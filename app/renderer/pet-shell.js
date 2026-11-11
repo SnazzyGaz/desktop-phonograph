@@ -96,7 +96,7 @@ async function openMenu(e){
 }
 D.onCommand(async c=>{
  const p=P(),v=V();
- switch(c.cmd){
+ try{switch(c.cmd){
   case 'files':p.openPaths(c.paths);break;
   case 'link':p.playLink(c.text);break;
   case 'lift':p.lift();break;
@@ -106,10 +106,11 @@ D.onCommand(async c=>{
   case 'inspect':if(!v.inspect.active)v.beginInspection();break;
   case 'keep':p.keepCurrent();break;
   case 'forget':p.forget(c.id);break;
-  case 'autoNext':p.autoNext=c.on;break;
+  case 'autoNext':p.autoNext=c.on;say(c.on?'The next one will play by itself':'It will stop after each record','hint');break;
   case 'pip':setPip(c.on);break;
   case 'toy':v.swapToy();break;
- }
+  case 'say':say(String(c.text||''),c.kind||'info');break;
+ }}catch(e){D.log('command',c&&c.cmd,e&&e.stack||String(e));say('That didn’t work just then. Give it another go.','error');}
 });
 
 /* ---------- needle close-up (corner overlay) ---------- */

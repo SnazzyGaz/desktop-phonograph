@@ -10,6 +10,7 @@
 const {app,BrowserWindow,ipcMain,Menu,Tray,screen,clipboard,dialog,nativeImage,shell,net}=require('electron');
 const path=require('path'),fs=require('fs'),fsp=fs.promises,os=require('os'),crypto=require('crypto');
 const {spawn}=require('child_process');
+const {readClipboardLink}=require('./clip-link');
 
 app.setAppUserModelId?.('app.deskphonograph.pet');
 if(process.env.DESK_PHONO_DATA)app.setPath('userData',process.env.DESK_PHONO_DATA); // tests: a throwaway data folder
@@ -21,6 +22,22 @@ const P={settings:path.join(DATA,'settings.json'),library:path.join(DATA,'librar
 for(const d of [P.covers,P.records,P.temp,P.bin])fs.mkdirSync(d,{recursive:true});
 function log(...a){try{fs.appendFileSync(P.log,new Date().toISOString()+' '+a.join(' ')+'\n');}catch{}}
 try{const st=fs.statSync(P.log);if(st.size>2e6)fs.writeFileSync(P.log,'');}catch{}
+let oopsAt=0;
+function oops(what,e){
+ log('error',what,e&&e.stack||String(e));
+ if(Date.now()-oopsAt<3000)return;oopsAt=Date.now();
+ try{send('pet:command',{cmd:'say',kind:'error',text:'Something went wrong there. It’s been noted in the log; give it another go.'});}catch{}
+}
+process.on('uncaughtException',e=>oops('uncaught',e)); // replaces Electron's modal error box
+process.on('unhandledRejection',e=>oops('unhandled',e));
+// Every menu and tray item goes through here: a click is logged, and one that throws (now or later) says so in the pet instead of crashing.
+function guard(items){
+ return items.map(it=>{
+  const o={...it};if(o.submenu)o.submenu=guard(o.submenu);
+  if(typeof it.click==='function'){const f=it.click,label=it.label||'item';o.click=(...a)=>{log('menu',label);try{const r=f(...a);if(r&&typeof r.catch==='function')r.catch(e=>oops('menu '+label,e));}catch(e){oops('menu '+label,e);}};}
+  return o;});
+}
+let clip=clipboard,popupMenu=null,trayMenu=null; // menus kept referenced while they are up
 
 /* ---------- settings ---------- */
 const DEFAULTS={bounds:null,onTop:true,pip:false,autoNext:true,volume:.8,toy:'hula',ytdlpChecked:0};
@@ -117,13 +134,14 @@ ipcMain.on('pet:resize',(e,dir,fx,fy)=>{
 function toggleShown(){if(!win)return;if(win.isVisible())win.hide();else{win.showInactive();if(settings.onTop)win.setAlwaysOnTop(true,'floating');}buildTray();}
 function buildTray(){
  if(!tray){tray=new Tray(nativeImage.createFromPath(path.join(__dirname,'build',process.platform==='win32'?'tray.ico':'tray.png')));tray.setToolTip('Desk Phonograph');tray.on('click',toggleShown);}
- tray.setContextMenu(Menu.buildFromTemplate([
+trayMenu=Menu.buildFromTemplate(guard([
   {label:win?.isVisible()?'Hide the phonograph':'Show the phonograph',click:toggleShown},
   {label:'Play a song from this computer…',click:()=>{if(!win.isVisible())toggleShown();openFiles();}},
   {label:'Play a web link from the clipboard',click:()=>{if(!win.isVisible())toggleShown();pasteLink();}},
   {type:'separator'},
   {label:'Put it back on screen',click:()=>{const wa=screen.getPrimaryDisplay().workArea;place(keepOnScreen({x:wa.x+wa.width-bounds.width-60,y:wa.y+wa.height-bounds.height-30,width:bounds.width,height:bounds.height}));if(!win.isVisible())toggleShown();}},
   {label:'Quit Desk Phonograph',click:quit}]));
+ tray.setContextMenu(trayMenu);
 }
 function quit(){quitting=true;app.quit();}
 async function openFiles(){
@@ -131,15 +149,15 @@ async function openFiles(){
   filters:[{name:'Songs',extensions:['mp3','wav','flac','ogg','oga','opus','m4a','aac','wma','webm','mp4']},{name:'Any file',extensions:['*']}]});
  if(!r.canceled&&r.filePaths.length)send('pet:command',{cmd:'files',paths:r.filePaths});
 }
-function pasteLink(){
- const text=(clipboard.readText()||'').trim();
- send('pet:command',{cmd:'link',text});
+async function pasteLink(){
+ let text='';try{text=String(await readClipboardLink(clip)||'').trim();}catch(e){log('clipboard',e&&e.message);}
+ send('pet:command',{cmd:'link',text}); // the page says what to do when there is no link
 }
 ipcMain.handle('pet:menu',(e,st)=>{
  st=st||{};
  const tmpl=[
   {label:'Play a song from this computer…',click:openFiles},
-  {label:'Play a web link (from the clipboard)',click:pasteLink},
+  {label:'Play a web link (from the clipboard)',click:()=>pasteLink()},
   {type:'separator'},
   {label:'Lift the needle',visible:!!st.playing,click:()=>send('pet:command',{cmd:'lift'})},
   {label:'Put the needle down',visible:!!st.record&&!st.playing,click:()=>send('pet:command',{cmd:'drop'})},
@@ -159,16 +177,17 @@ ipcMain.handle('pet:menu',(e,st)=>{
   {label:'Play the next one automatically',type:'checkbox',checked:settings.autoNext,click:m=>{settings.autoNext=m.checked;saveSettings();send('pet:command',{cmd:'autoNext',on:m.checked});}},
   {label:'Needle close-up',type:'checkbox',checked:settings.pip,click:m=>{settings.pip=m.checked;saveSettings();send('pet:command',{cmd:'pip',on:m.checked});}},
   {label:'Swap the dancer',click:()=>send('pet:command',{cmd:'toy'})},
-  {label:'Always on top',type:'checkbox',checked:settings.onTop,click:m=>{settings.onTop=m.checked;saveSettings();win.setAlwaysOnTop(m.checked,'floating');}},
+  {label:'Always on top',type:'checkbox',checked:settings.onTop,click:m=>{settings.onTop=m.checked;saveSettings();win.setAlwaysOnTop(m.checked,'floating');send('pet:command',{cmd:'say',kind:'hint',text:m.checked?'Stays on top of other windows':'Other windows can cover it now'});}},
   {type:'separator'},
   {label:'Hide (click the tray icon to bring it back)',click:toggleShown},
   {label:'Quit',click:quit}];
- Menu.buildFromTemplate(tmpl).popup({window:win});
+ const m=Menu.buildFromTemplate(guard(tmpl));popupMenu=m;
+ m.popup({window:win,callback:()=>{setTimeout(()=>{if(popupMenu===m)popupMenu=null;},1500);}});
  return true;
 });
 ipcMain.handle('pet:settings',()=>({...settings}));
 ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','toy','pip','autoNext'])if(k in patch)settings[k]=patch[k];saveSettings();}});
-ipcMain.handle('pet:clipboard',()=>(clipboard.readText()||'').trim());
+ipcMain.handle('pet:clipboard',async()=>{try{return String(await readClipboardLink(clip)||'').trim();}catch(e){log('clipboard',e&&e.message);return '';}});
 
 /* ---------- library on disk ---------- */
 const safeId=id=>/^[A-Za-z0-9_-]{1,80}$/.test(String(id||''));
@@ -343,6 +362,8 @@ ipcMain.handle('pet:temp-sweep',async(e,files)=>{await sweepTemp(new Set((files|
 ipcMain.on('pet:log',(e,...a)=>log('page',...a.map(String)));
 
 /* ---------- life cycle ---------- */
+// Tests only (never set in normal use): reach the menus as built, and stand in a fake clipboard.
+if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;}};
 app.on('second-instance',()=>{if(win){if(!win.isVisible())toggleShown();}});
 app.whenReady().then(()=>{
  Menu.setApplicationMenu(null);
