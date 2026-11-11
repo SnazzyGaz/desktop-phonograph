@@ -1,6 +1,6 @@
 {
   "name": "desk-phonograph",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "productName": "Desk Phonograph",
   "description": "A little phonograph that sits on your desktop. Drop a song on it, or paste a link to any audio or video and it plays as a record.",
   "private": true,
