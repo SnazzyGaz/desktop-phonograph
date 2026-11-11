@@ -1312,13 +1312,13 @@ function shadowSignature(){
  for(const g of outgoing.children)s+=g.position.x*.019+g.position.z*.023;
  return s;
 }
-let shadowRenders=0;
+let shadowRenders=0,shadowWake=0;
 function updateShadows(now){
  const sig=shadowSignature();
  if(!(Math.abs(sig-shadowSig)<=1e-6))shadowPending=true; // written so the first NaN compare counts as a change: otherwise the shadow map froze after its first render
  const gap=PET&&!drag&&!armHold&&!sleeveDrag&&!inspect.active&&!dropIn&&!outgoing.children.length?120:33; // the pet: the dancer's shadow need not follow every frame
  if(shadowPending&&now-shadowAt>gap){renderer.shadowMap.needsUpdate=true;shadowRenders++;shadowSig=sig;shadowAt=now;shadowPending=false;}
- else if(shadowPending)invalidate(1);
+ else if(shadowPending){if(!PET)invalidate(1);else if(!shadowWake)shadowWake=setTimeout(()=>{shadowWake=0;invalidate(1);},Math.max(1,gap-(now-shadowAt)+1));} // the pet: one timed wake, not a redraw every frame (that bypassed the frame cap)
 }
 const focusPoint=new THREE.Vector3(); // the near half of the record
 function signature(){
