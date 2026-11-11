@@ -370,5 +370,8 @@ app.whenReady().then(()=>{
  createWindow();buildTray();
  setTimeout(()=>prepareYtdlp().catch(e=>log('prepare',e.message)),8000);
 });
+// Windows can quietly drop a window's topmost flag (another topmost window, a full-screen app, a
+// display change); then the menu's tick and the window disagree and the first click seems to do nothing.
+setInterval(()=>{try{if(win&&!win.isDestroyed()&&settings.onTop&&win.isVisible()&&!win.isAlwaysOnTop()){win.setAlwaysOnTop(true,'floating');log('always on top: put back');}}catch(e){oops('ontop',e);}},3000);
 app.on('before-quit',()=>{quitting=true;});
 app.on('window-all-closed',()=>{if(quitting)app.quit();});

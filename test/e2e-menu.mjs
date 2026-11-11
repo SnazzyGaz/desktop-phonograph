@@ -69,8 +69,8 @@ ok(settingsFile().autoNext===!s.auto,'…and remembers it');
 await popupItem('Play the next one automatically');ok((await st()).auto===s.auto,'…and back');
 await popupItem('Needle close-up');ok((await st()).pip===!s.pip,`“Needle close-up” → ${!s.pip}`);await popupItem('Needle close-up');ok((await st()).pip===s.pip,'…and back');
 await popupItem('Swap the dancer');ok((await st()).toy!==s.toy,`“Swap the dancer” → ${(await st()).toy}`);
-const top0=await M(()=>global.__deskPhono.win.isAlwaysOnTop());
-await popupItem('Always on top');ok(await mainUntil(new Function(`return global.__deskPhono.win.isAlwaysOnTop()===${!top0}`))&&/top|cover/.test(await bubble()),`“Always on top” → ${!top0}, and says so (“${await bubble()}”)`);
+ok(await mainUntil(()=>global.__deskPhono.win.isAlwaysOnTop(),5000),'it really is on top before the toggle (put back if Windows dropped it)');const top0=true;
+await popupItem('Always on top');ok(await mainUntil(new Function(`return global.__deskPhono.win.isAlwaysOnTop()===${!top0}`),2500)&&/top|cover/.test(await bubble())&&settingsFile().onTop===false,`“Always on top” → ${!top0}, and says so (“${await bubble()}”)`);
 await popupItem('Always on top');ok(await M(()=>global.__deskPhono.win.isAlwaysOnTop())===top0,'…and back');
 for(const kind of ['object','number','undef','throws']){await setClip(kind);await popupItem('Play a web link (from the clipboard)');await wait(400);const b=await bubble();ok(/Copy a web link first/.test(b),`clipboard gives ${kind}: a friendly hint, no crash (“${b.slice(0,48)}…”)`);}
 for(const kind of ['promise','bookmark']){
