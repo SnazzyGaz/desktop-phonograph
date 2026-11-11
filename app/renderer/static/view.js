@@ -119,7 +119,8 @@ const zoom={goal:null,vel:0,x:0,y:0};
 const camDist=()=>camera.position.distanceTo(controls.target);
 controls._handleMouseWheel=function(e){
  if(PET&&fan.on){fanScroll(Math.sign(e.deltaY));return;}
-if(PET&&!inspect.active){const pk=pickAt(e);if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}window.petShell?.wheel(e);return;}
+if(PET&&!inspect.active){const pk=pickAt(e);if(pk?.kind==='knob'){knobWheel(e);return;} // over the knob the wheel turns it, it doesn't size the pet
+if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}window.petShell?.wheel(e);return;}
  if(camTween&&!inspect.active)camTween=null;
  const lo=Math.log(controls.minDistance),hi=Math.log(controls.maxDistance);
  if(zoom.goal===null){zoom.goal=Math.log(camDist());zoom.vel=0;}
@@ -582,6 +583,10 @@ function engrave(text,w,h,color='#d9bd7a',lit=false){
    drawer below, so none of them crowd each other.) Each one pushes in when pressed, glows a
    little when the cursor is on it, and runs the same action as the menu. */
 const TRANSPORT=['prev','toggle','next'];
+/* The pet's front panel, in R from the cabinet's front face (x across, z up from the body's foot):
+   a wide Now Playing card across the top, the three keys in a row under it, the volume knob at
+   the left end of that row (the dancer's pip keeps the lower right corner). */
+const PANEL={cardZ:.515,keyZ:.232,keyR:.09,keyX:[-.16,.1,.36],knobX:-.73,knobR:.088};
 const keyFx={press:{prev:1,toggle:1,next:1},glow:{prev:0,toggle:0,next:0},hover:null};
 function keyGlyph(kind){
  if(typeof document.createElement!=='function')return null;
@@ -601,9 +606,9 @@ function keyGlyph(kind){
 }
 function buildTransport(R,W,D,bodyBot,H,brass,bakelite){
  const g=new THREE.Group();g.name='transport';
- const faceY=-D+R*.02,z=bodyBot+H*.665,r=R*.058;
+ const faceY=-D+R*.02,z=bodyBot+R*PANEL.keyZ,r=R*PANEL.keyR;
  TRANSPORT.forEach((id,i)=>{
-  const k=new THREE.Group();k.name='transport-'+id;k.userData={pick:'transport',key:id};k.position.set(R*.63+i*R*.165,faceY,z);
+  const k=new THREE.Group();k.name='transport-'+id;k.userData={pick:'transport',key:id};k.position.set(R*PANEL.keyX[i],faceY,z);
   const bezel=new THREE.Mesh(new THREE.TorusGeometry(r*1.12,R*.008,12,40),brass);bezel.rotation.x=Math.PI/2;k.add(bezel);
   const press=new THREE.Group();press.name='press';k.add(press);
   const mat=bakelite.clone();mat.emissive=new THREE.Color(0xff9a3c);mat.emissiveIntensity=0;
@@ -613,11 +618,65 @@ function buildTransport(R,W,D,bodyBot,H,brass,bakelite){
   if(tex){const gm=new THREE.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false,metalness:.75,roughness:.32,color:0xffffff,emissive:new THREE.Color(0xffc070),emissiveMap:tex,emissiveIntensity:0,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3});
    const gl=new THREE.Mesh(new THREE.PlaneGeometry(r*1.9,r*1.9),gm);gl.name='glyph';gl.rotation.x=Math.PI/2;gl.position.y=-R*.03-.15;press.add(gl);}
   const hitM=new THREE.MeshBasicMaterial({visible:false});hitM.userData.shared=true;
-  const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.45,12,8),hitM);hit.name='transport-hit';k.add(hit);
+  const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.3,12,8),hitM);hit.name='transport-hit';k.add(hit);
   k.userData.mats=[mat,press.getObjectByName('glyph')?.material].filter(Boolean);k.userData.press=press;
   g.add(k);
  });
  return g;
+}
+/* ---------- the volume knob ----------
+   A knurled brass knob at the left end of the key row, over an engraved 0–10 scale (270°).
+   Drag up or down on it, or scroll over it (scrolling anywhere else still sizes the pet); it
+   eases to the level and a calm bubble says the number. The menu's volume moves it too. */
+const knobFx={shown:-1,drag:null,acc:0,sayT:0,glow:0};
+const KNOB_SWEEP=Math.PI*1.5;
+function knobDial(){
+ if(typeof document.createElement!=='function')return null;
+ const s=512,c=document.createElement('canvas');c.width=c.height=s;const g=c.getContext('2d');if(!g)return null;
+ g.translate(s/2,s/2);g.strokeStyle='#ecd08a';g.fillStyle='#ecd08a';g.lineCap='round';
+ for(let i=0;i<=20;i++){const a=-KNOB_SWEEP/2+KNOB_SWEEP*i/20-Math.PI/2,big=i%2===0,r0=s*(big?.37:.395),r1=s*.45;
+  g.lineWidth=s*(big?.02:.012);g.beginPath();g.moveTo(Math.cos(a)*r0,Math.sin(a)*r0);g.lineTo(Math.cos(a)*r1,Math.sin(a)*r1);g.stroke();}
+ g.lineWidth=s*.008;g.beginPath();g.arc(0,0,s*.45,-KNOB_SWEEP/2-Math.PI/2,KNOB_SWEEP/2-Math.PI/2);g.stroke();
+ const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t;
+}
+function buildVolumeKnob(R,W,D,bodyBot,brass,bakelite){
+ const g=new THREE.Group();g.name='volume-knob';g.userData.pick='knob';
+ const faceY=-D+R*.02,r=R*PANEL.knobR;g.position.set(R*PANEL.knobX,faceY,bodyBot+R*PANEL.keyZ);
+ const tex=knobDial();
+ if(tex){const dial=new THREE.Mesh(new THREE.PlaneGeometry(r*3.2,r*3.2),new THREE.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false,metalness:.7,roughness:.35,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+  dial.name='knob-dial';dial.rotation.x=Math.PI/2;dial.position.y=-.1;g.add(dial);}
+ const turn=new THREE.Group();turn.name='knob-turn';g.add(turn);
+ const skirt=new THREE.Mesh(new THREE.CylinderGeometry(r*1.04,r*1.1,R*.014,64),brass);skirt.position.y=-R*.007;turn.add(skirt);
+ const knurl=brass.clone();knurl.flatShading=true;
+ const body=new THREE.Mesh(new THREE.CylinderGeometry(r*.86,r*.92,R*.052,36,1),knurl);body.position.y=-R*.04;turn.add(body); // flat facets read as knurling
+ const cap=new THREE.Mesh(new THREE.CylinderGeometry(r*.74,r*.84,R*.014,64),bakelite);cap.position.y=-R*.072;turn.add(cap);
+ const ptr=new THREE.Mesh(new THREE.BoxGeometry(r*.1,R*.006,r*.62),new THREE.MeshStandardMaterial({color:0xe9cf8e,metalness:.85,roughness:.28,emissive:new THREE.Color(0x553a10),emissiveIntensity:.25}));
+ ptr.name='knob-pointer';ptr.position.set(0,-R*.08,r*.38);turn.add(ptr);
+ const hitM=new THREE.MeshBasicMaterial({visible:false});hitM.userData.shared=true;
+ const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.35,12,8),hitM);hit.name='knob-hit';g.add(hit);
+ return g;
+}
+function knobLevel(){const p=window.vinyl;return p?(p.muted?0:Math.max(0,Math.min(1,p.volume??.8))):.8;}
+function setKnobVolume(v){
+ const p=window.vinyl;if(!p?.setVolume)return;v=Math.round(Math.max(0,Math.min(1,v))*100)/100;
+ if(Math.abs(v-knobLevel())<.005&&!p.muted)return;
+ try{p.setVolume(v);}catch(e){window.desk?.log?.('knob',String(e?.message||e));return;}
+ const say=()=>window.petShell?.say?.(knobLevel()>0?`Volume ${Math.round(knobLevel()*100)}%`:'Silent','hint');
+ if(!knobFx.sayT){say();knobFx.sayT=setTimeout(()=>{knobFx.sayT=0;say();},140);} // calm: a few updates a second, always ending on the final level
+ if(hov.id==='k:volume')showTitle();invalidate(3);
+}
+function knobWheel(e){
+ knobFx.acc+=e.deltaY*(e.deltaMode===1?33:1);const steps=Math.trunc(knobFx.acc/50);if(!steps)return;knobFx.acc-=steps*50;
+ setKnobVolume(knobLevel()-steps*.05);
+}
+function updateKnob(dt){
+ const k=phonograph.getObjectByName('knob-turn');if(!k)return false;const want=knobLevel();
+ if(knobFx.shown<0)knobFx.shown=want;let busy=false;
+ if(Math.abs(want-knobFx.shown)>.002){knobFx.shown+=(want-knobFx.shown)*Math.min(1,dt*(reduce()?60:16));busy=true;}else knobFx.shown=want;
+ k.rotation.y=-KNOB_SWEEP/2+KNOB_SWEEP*knobFx.shown;
+ const gw=hov.id==='k:volume'||knobFx.drag?1:0;if(Math.abs(gw-knobFx.glow)>.01){knobFx.glow+=(gw-knobFx.glow)*Math.min(1,dt*14);busy=true;}else knobFx.glow=gw;
+ const ptr=k.getObjectByName('knob-pointer');if(ptr)ptr.material.emissiveIntensity=.25+.5*knobFx.glow;
+ return busy;
 }
 function pressKey(id){
  if(!TRANSPORT.includes(id))return;keyFx.press[id]=reduce()?1:0;toyClick();invalidate(3);
@@ -628,8 +687,8 @@ function updateKeys(dt){
  for(const k of t.children){const id=k.userData.key;if(!id)continue;
   if(keyFx.press[id]<1){keyFx.press[id]=Math.min(1,keyFx.press[id]+dt/.18);busy=true;}
   const want=keyFx.hover===id?1:0,gl=keyFx.glow[id];if(Math.abs(want-gl)>.005){keyFx.glow[id]=gl+(want-gl)*Math.min(1,dt*14);busy=true;}else keyFx.glow[id]=want;
-  k.userData.press.position.y=R*.014*Math.sin(Math.PI*keyFx.press[id]);
-  const [cap,glyph]=k.userData.mats;if(cap)cap.emissiveIntensity=.1*keyFx.glow[id];if(glyph)glyph.emissiveIntensity=.32*keyFx.glow[id];
+  k.userData.press.position.y=R*.018*Math.sin(Math.PI*keyFx.press[id]);
+  const [cap,glyph]=k.userData.mats;if(cap)cap.emissiveIntensity=.1*keyFx.glow[id];if(glyph)glyph.emissiveIntensity=.18+.3*keyFx.glow[id]; // the glyphs always a little lit, so they read small
  }
  return busy;
 }
@@ -638,7 +697,7 @@ function updateKeys(dt){
    old filing drawer) that says what is on the turntable. The card is a canvas texture: paper
    with grain and age, ink that spreads a little, the frame's shadow along its top edge. */
 const NOW={tex:null,canvas:null,key:null};
-const CARD_W=.66,CARD_H=.2; // in R
+const CARD_W=1.8,CARD_H=.21; // in R: a wide card across the front panel
 function seeded(n){let s=n|0||1;return ()=>((s=Math.imul(s^s>>>15,2246822507)^Math.imul(s^s>>>13,3266489909))>>>0)/4294967296;}
 function fitText(g,text,maxW,size,min,weight,family,style=''){
  let px=size;const font=p=>`${style} ${weight} ${p}px ${family}`.trim();
@@ -652,7 +711,7 @@ function inkText(g,text,x,y,color){ // a soft halo first (ink bleeding into the 
 }
 function drawNowPlaying(np){
  if(typeof document.createElement!=='function')return;
- if(!NOW.canvas){NOW.canvas=document.createElement('canvas');NOW.canvas.width=1024;NOW.canvas.height=Math.round(1024*CARD_H/CARD_W);}
+ if(!NOW.canvas){NOW.canvas=document.createElement('canvas');NOW.canvas.width=2048;NOW.canvas.height=Math.round(2048*CARD_H/CARD_W);}
  const c=NOW.canvas,g=c.getContext('2d');if(!g)return;const W=c.width,H=c.height,rnd=seeded(1931);
  const serif='Georgia, "Times New Roman", "Liberation Serif", "DejaVu Serif", serif';
  // aged cream card
@@ -661,7 +720,7 @@ function drawNowPlaying(np){
  for(let i=0;i<d.length;i+=4){const n=(rnd()-.5)*16;d[i]+=n;d[i+1]+=n;d[i+2]+=n*.8;}
  g.putImageData(img,0,0);
  g.globalAlpha=.07;g.strokeStyle='#8a6a3a';g.lineWidth=1; // fibres
- for(let i=0;i<90;i++){const x=rnd()*W,y=rnd()*H,a=rnd()*Math.PI,l=8+rnd()*26;g.beginPath();g.moveTo(x,y);g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l*.4);g.stroke();}
+ for(let i=0;i<160;i++){const x=rnd()*W,y=rnd()*H,a=rnd()*Math.PI,l=8+rnd()*26;g.beginPath();g.moveTo(x,y);g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l*.4);g.stroke();}
  g.globalAlpha=1;
  for(let i=0;i<7;i++){const x=rnd()*W,y=rnd()*H,r=3+rnd()*9,f=g.createRadialGradient(x,y,0,x,y,r);f.addColorStop(0,'rgba(150,105,50,.16)');f.addColorStop(1,'rgba(150,105,50,0)');g.fillStyle=f;g.fillRect(x-r,y-r,2*r,2*r);} // foxing
  g.globalCompositeOperation='multiply';const v=g.createRadialGradient(W/2,H/2,H*.4,W/2,H/2,W*.62);v.addColorStop(0,'#ffffff');v.addColorStop(1,'#cdb48a');g.fillStyle=v;g.fillRect(0,0,W,H);g.globalCompositeOperation='source-over';
@@ -671,14 +730,15 @@ function drawNowPlaying(np){
  const b=g.createLinearGradient(0,H,0,H*.9);b.addColorStop(0,'rgba(40,24,8,.18)');b.addColorStop(1,'rgba(40,24,8,0)');g.fillStyle=b;g.fillRect(0,H*.9,W,H*.1);
  g.textAlign='center';g.textBaseline='middle';
  // NOW PLAYING, small spaced capitals between fine rules
- g.font=`700 ${Math.round(H*.13)}px ${serif}`;if('letterSpacing' in g)g.letterSpacing=`${Math.round(H*.035)}px`;
- const head='NOW PLAYING',hw=g.measureText(head).width;inkText(g,head,W/2,H*.27,'#6a4320');if('letterSpacing' in g)g.letterSpacing='0px';
- g.strokeStyle='rgba(106,67,32,.7)';g.lineWidth=2;for(const s of [-1,1]){g.beginPath();g.moveTo(W/2+s*(hw/2+18),H*.27);g.lineTo(W/2+s*(hw/2+18+W*.12),H*.27);g.stroke();}
- if(!np){g.font=`italic 400 ${Math.round(H*.2)}px ${serif}`;inkText(g,'— no record —',W/2,H*.57,'#7a5a3a');}
- else{
-  const title=fitText(g,String(np.title||'Record'),W*.88,Math.round(H*.3),Math.round(H*.17),700,serif);
-  inkText(g,title,W/2,np.artist?H*.54:H*.6,'#2a170a');
-  if(np.artist){const a=fitText(g,String(np.artist),W*.8,Math.round(H*.17),Math.round(H*.12),400,serif,'italic');inkText(g,a,W/2,H*.8,'#4a3018');}
+ g.font=`700 ${Math.round(H*.12)}px ${serif}`;if('letterSpacing' in g)g.letterSpacing=`${Math.round(H*.045)}px`;
+ const head='NOW PLAYING',hw=g.measureText(head).width;inkText(g,head,W/2,H*.19,'#6a4320');if('letterSpacing' in g)g.letterSpacing='0px';
+ g.strokeStyle='rgba(106,67,32,.7)';g.fillStyle='rgba(106,67,32,.7)';g.lineWidth=3;
+ for(const s of [-1,1]){const x0=W/2+s*(hw/2+28),x1=x0+s*W*.16;g.beginPath();g.moveTo(x0,H*.19);g.lineTo(x1,H*.19);g.stroke();g.beginPath();g.arc(x1+s*8,H*.19,5,0,Math.PI*2);g.fill();}
+ if(!np){g.font=`italic 400 ${Math.round(H*.26)}px ${serif}`;inkText(g,'— no record —',W/2,H*.58,'#7a5a3a');}
+ else{ // as big as the card allows: the title is what you read from across the desk
+  const title=fitText(g,String(np.title||'Record'),W*.92,Math.round(H*.4),Math.round(H*.22),700,serif);
+  inkText(g,title,W/2,np.artist?H*.52:H*.6,'#2a170a');
+  if(np.artist){const a=fitText(g,String(np.artist),W*.84,Math.round(H*.22),Math.round(H*.14),400,serif,'italic');inkText(g,a,W/2,H*.83,'#4a3018');}
  }
  if(!NOW.tex){NOW.tex=new THREE.CanvasTexture(c);NOW.tex.colorSpace=THREE.SRGBColorSpace;NOW.tex.userData.shared=true;}
  NOW.tex.anisotropy=renderer.capabilities?.getMaxAnisotropy?.()||1;NOW.tex.needsUpdate=true;invalidate(2);
@@ -688,25 +748,24 @@ function refreshNowPlaying(){
  if(k===NOW.key&&NOW.tex)return;NOW.key=k;drawNowPlaying(np);
 }
 function buildDrawer(R,W,D,bodyBot,brass,wood){
- const g=new THREE.Group();g.name='drawer';
- const w=R*1.0,h=R*.3,z0=bodyBot+R*.16,y=-D+R*.012;
- const front=slab(w,R*.03,h,R*.01,wood,4);front.position.set(0,y,z0);front.name='drawer-front';g.add(front);
- const face=y-R*.015,cz=z0+h/2;
+ const g=new THREE.Group();g.name='drawer'; // (the name stays: it is the card's mount)
+ const y=-D+R*.02,face=y-R*.004,cz=bodyBot+R*PANEL.cardZ;
  refreshNowPlaying();
- const card=new THREE.Mesh(new THREE.PlaneGeometry(R*CARD_W,R*CARD_H),new THREE.MeshStandardMaterial({map:NOW.tex,roughness:.88,metalness:0}));
- card.name='now-playing';card.rotation.x=Math.PI/2;card.position.set(0,face-R*.002,cz);g.add(card);
- // brass frame: a flat bezel with a lip, four screw heads
- const fw=R*(CARD_W+.045),fh=R*(CARD_H+.04),iw=R*CARD_W*.995,ih=R*CARD_H*.99;
- const sh=new THREE.Shape();sh.moveTo(-fw/2,-fh/2);sh.lineTo(fw/2,-fh/2);sh.lineTo(fw/2,fh/2);sh.lineTo(-fw/2,fh/2);sh.closePath();
- const hole=new THREE.Path();hole.moveTo(-iw/2,-ih/2);hole.lineTo(-iw/2,ih/2);hole.lineTo(iw/2,ih/2);hole.lineTo(iw/2,-ih/2);hole.closePath();sh.holes.push(hole);
- const frame=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:R*.008,bevelEnabled:true,bevelThickness:R*.003,bevelSize:R*.003,bevelSegments:2}),brass);
- frame.name='now-playing-frame';frame.rotation.x=Math.PI/2;frame.position.set(0,face-R*.002,cz);g.add(frame);
- for(const sx of [-1,1])for(const sz of [-1,1]){const s=new THREE.Mesh(new THREE.SphereGeometry(R*.009,12,6,0,Math.PI*2,0,Math.PI/2),brass);s.rotation.x=Math.PI;s.position.set(sx*(fw/2-R*.014),face-R*.012,cz+sz*(fh/2-R*.012));g.add(s);}
- // two small brass pulls either side
- for(const sx of [-1,1]){const p=new THREE.Group();p.position.set(sx*R*.43,face,cz);
-  const rose=new THREE.Mesh(new THREE.CylinderGeometry(R*.024,R*.024,R*.008,24),brass);rose.position.y=-R*.004;p.add(rose);
-  const stem=new THREE.Mesh(new THREE.CylinderGeometry(R*.008,R*.008,R*.03,12),brass);stem.position.y=-R*.02;p.add(stem);
-  const knob=new THREE.Mesh(new THREE.SphereGeometry(R*.02,20,12),brass);knob.position.y=-R*.04;knob.scale.set(1,.7,1);p.add(knob);g.add(p);}
+ // a dark bed under the card, the card, then a stepped brass frame with deco corners
+ const bed=new THREE.Mesh(new THREE.BoxGeometry(R*(CARD_W+.075),R*.012,R*(CARD_H+.065)),new THREE.MeshStandardMaterial({color:0x2a1408,roughness:.7}));bed.position.set(0,y-R*.004,cz);g.add(bed);
+ const card=new THREE.Mesh(new THREE.PlaneGeometry(R*CARD_W,R*CARD_H),new THREE.MeshStandardMaterial({map:NOW.tex,roughness:.88,metalness:0,emissive:new THREE.Color(0xffffff),emissiveMap:NOW.tex,emissiveIntensity:.22}));
+ card.name='now-playing';card.rotation.x=Math.PI/2;card.position.set(0,face-R*.008,cz);g.add(card); // a faint glow of its own: it sits in the lid's shadow
+ const frameAt=(ow,oh,iw,ih,depth,dy,name)=>{
+  const sh=new THREE.Shape();sh.moveTo(-ow/2,-oh/2);sh.lineTo(ow/2,-oh/2);sh.lineTo(ow/2,oh/2);sh.lineTo(-ow/2,oh/2);sh.closePath();
+  const hole=new THREE.Path();hole.moveTo(-iw/2,-ih/2);hole.lineTo(-iw/2,ih/2);hole.lineTo(iw/2,ih/2);hole.lineTo(iw/2,-ih/2);hole.closePath();sh.holes.push(hole);
+  const m=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth,bevelEnabled:true,bevelThickness:R*.003,bevelSize:R*.003,bevelSegments:2}),brass);
+  m.name=name;m.rotation.x=Math.PI/2;m.position.set(0,face-R*.008+dy,cz);g.add(m);return m;};
+ const fw=R*(CARD_W+.05),fh=R*(CARD_H+.045);
+ frameAt(fw,fh,R*CARD_W*.997,R*CARD_H*.985,R*.01,0,'now-playing-frame');
+ frameAt(fw+R*.03,fh+R*.03,fw-R*.004,fh-R*.004,R*.005,R*.004,'now-playing-frame-outer'); // a fine outer step
+ for(const sx of [-1,1])for(const sz of [-1,1]){ // stepped deco corners with screw heads
+  const c=new THREE.Mesh(new THREE.BoxGeometry(R*.045,R*.012,R*.045),brass);c.rotation.y=Math.PI/4;c.position.set(sx*(fw/2+R*.008),face-R*.016,cz+sz*(fh/2+R*.008));g.add(c);
+  const s=new THREE.Mesh(new THREE.SphereGeometry(R*.008,12,6,0,Math.PI*2,0,Math.PI/2),brass);s.rotation.x=Math.PI;s.position.set(sx*(fw/2+R*.008),face-R*.024,cz+sz*(fh/2+R*.008));g.add(s);}
  return g;
 }
 window.addEventListener('vinyl-record',()=>setTimeout(refreshNowPlaying,0));
@@ -919,7 +978,8 @@ function entryOf(id){return (fan.list||[]).find(x=>x.id===id)||sleeveData.find(x
 function hoverInfo(){
  const id=hov.id;if(!id)return null;const kind=id[0],key=id.slice(2);
  if(kind==='k'){const p=window.vinyl;const label=key==='prev'?'Previous':key==='next'?'Next':(p?.playing?'Pause':'Play');
-  const k=phonograph.getObjectByName('transport-'+key);if(!k)return null;scene.updateMatrixWorld();return {title:label,artist:'',at:k.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,0,R*.075))};}
+  if(key==='volume'){const n=phonograph.getObjectByName('volume-knob');if(!n)return null;scene.updateMatrixWorld();const v=knobLevel();return {title:v>0?`Volume ${Math.round(v*100)}%`:'Silent',artist:'drag or scroll',at:n.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,0,R*.13))};}
+  const k=phonograph.getObjectByName('transport-'+key);if(!k)return null;scene.updateMatrixWorld();return {title:label,artist:'',at:k.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,0,R*.11))};}
  const e=entryOf(key);if(!e)return null;
  const empty=currentSleeve?.id===key;const title=e.title||e.label||'Record',artist=empty?'playing now':(e.artist||'');
  if(kind==='f'){const c=fan.cards.find(c=>c.userData.fanId===key);if(!c?.userData.to)return null;const t=c.userData.to;
@@ -1418,7 +1478,7 @@ function buildPhonograph(R){
  phonograph.traverse(o=>{if(o.isMesh){o.castShadow=!o.material?.transparent;o.receiveShadow=true;}});
  phonograph.add(buildShibaSpot(R,top,W,D)); // after the traverse: the fur shells set their own shadow flags
  {const sw=buildToySwitch(R,W,D,bodyBot,brass);sw.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(sw);}
- if(PET){const tp=buildTransport(R,W,D,bodyBot,H,brass,bakelite),dr=buildDrawer(R,W,D,bodyBot,brass,mahogany);for(const x of [tp,dr]){x.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(x);}}
+ if(PET){const tp=buildTransport(R,W,D,bodyBot,H,brass,bakelite),dr=buildDrawer(R,W,D,bodyBot,brass,mahogany),kn=buildVolumeKnob(R,W,D,bodyBot,brass,bakelite);knobFx.shown=-1;for(const x of [tp,dr,kn]){x.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(x);}}
  applyToys();
  const shadow=contactDecal(2*W+R*.95,2*D+R*.95,.8);if(shadow){shadow.position.z=tableZ+.4;phonograph.add(shadow);}
  key.target.position.set(0,0,tableZ*.5);dropRing.scale.setScalar(R*1.05);dropRing.position.z=.4;invalidate();
@@ -1570,6 +1630,7 @@ function pickAt(e){
  const v=window.vinyl;
  if(fan.on){const f=fanPick(e);if(f)return f;}
  setRay(e);
+ {const kn=phonograph.getObjectByName('volume-knob');if(kn&&ray.intersectObject(kn,true).length)return {kind:'knob'};}
  {const t=phonograph.getObjectByName('transport');if(t){const h=ray.intersectObject(t,true)[0];if(h){let o=h.object;while(o&&!o.userData.key)o=o.parent;if(o)return {kind:'transport',key:o.userData.key};}}}
  if(v.record&&tonearm.visible){const a=ray.intersectObjects(armParts,false)[0];if(a)return {kind:'arm'};}
  {const sw=phonograph.getObjectByName('toy-switch');if(sw&&ray.intersectObject(sw,true).length)return {kind:'toy-switch'};}
@@ -1596,6 +1657,7 @@ renderer.domElement.addEventListener('pointerdown',e=>{
  if(p0){
   renderer.domElement.setPointerCapture?.(e.pointerId);
   if(p0.kind==='transport'){pressKey(p0.key);return;}
+  if(p0.kind==='knob'){knobFx.drag={y:e.clientY,v0:knobLevel()};setHoverNow('k:volume');setCursor('ns-resize');invalidate(2);return;} // never a window drag
   if(p0.kind==='toy-switch'){swapToy();return;}
   if(p0.kind==='blanks'){window.dispatchEvent?.(new CustomEvent('vinyl-open'));return;}
   if(p0.kind==='post'){window.dispatchEvent?.(new CustomEvent('vinyl-save',{detail:{id:null}}));return;}
@@ -1632,8 +1694,9 @@ function moveSleeve(e){
 }
 renderer.domElement.addEventListener('pointermove',e=>{
  const v=window.vinyl;
- if(!sleeveDrag&&!armHold&&!drag&&!inspect.active&&e.buttons===0){const p=pickAt(e);setCursor(p?(p.kind==='transport'||p.kind==='fan'?'pointer':'grab'):'');
-  const id=p?.kind==='sleeve'&&p.obj.userData.racked?'s:'+p.obj.userData.sleeveId:p?.kind==='transport'?'k:'+p.key:p?.kind==='fan'?'f:'+p.id:null;
+ if(knobFx.drag){setKnobVolume(knobFx.drag.v0+(knobFx.drag.y-e.clientY)/140);return;}
+ if(!sleeveDrag&&!armHold&&!drag&&!inspect.active&&e.buttons===0){const p=pickAt(e);setCursor(p?(p.kind==='transport'||p.kind==='fan'?'pointer':p.kind==='knob'?'ns-resize':'grab'):'');
+  const id=p?.kind==='sleeve'&&p.obj.userData.racked?'s:'+p.obj.userData.sleeveId:p?.kind==='transport'?'k:'+p.key:p?.kind==='knob'?'k:volume':p?.kind==='fan'?'f:'+p.id:null;
   wantHover(id);}
  if(inspect.active){if(inspect.drag&&inspect.phase==='held'){
   const dx=e.clientX-inspect.drag.x,dy=e.clientY-inspect.drag.y;inspect.drag={x:e.clientX,y:e.clientY};
@@ -1689,7 +1752,7 @@ function endPointer(e,cancel=false){
   invalidate();return true;}
  return false;
 }
-renderer.domElement.addEventListener('pointerup',e=>{if(inspect.active&&e.button!==0){inspect.drag=null;return;}if(e.button!==0)return;
+renderer.domElement.addEventListener('pointerup',e=>{if(knobFx.drag&&e.button===0){knobFx.drag=null;invalidate(2);return;}if(inspect.active&&e.button!==0){inspect.drag=null;return;}if(e.button!==0)return;
  if(fan.press){const f=fan.press;fan.press=null;if(Math.hypot(e.clientX-f.x,e.clientY-f.y)<6&&fan.on&&!fan.closing){fanClose();window.vinyl?.goTo?.(f.id);}return;}if(endPointer(e))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 renderer.domElement.addEventListener('dblclick',e=>{if(e.button!==0)return;
  if(PET&&!inspect.active&&onCrate(e)&&!fanPick(e)){if(fan.on)fanClose();else fanOpen();return;}
@@ -1811,7 +1874,7 @@ function tickScene(dt, nowMs){
  const why=[];
  if(shibaMoving)why.push('shiba');
  if(updateToys(dt))why.push('toy');
- if(updateKeys(dt))why.push('keys');if(updateFan())why.push('fan');
+ if(updateKeys(dt))why.push('keys');if(updateKnob(dt))why.push('knob');if(updateFan())why.push('fan');
  grooveSurface();
  if(updateSleeves(dt))why.push('sleeves');if(updateLathe(dt))why.push('lathe');if(updateInspection(dt))why.push('inspect');if(updateSwap(dt))why.push('swap');
  if(updateCamTween(dt)){zoom.goal=null;zoom.vel=0;why.push('flight');}else{const z=applyZoom(dt);if(controls.update()||z)why.push('controls');}
@@ -1857,7 +1920,7 @@ Object.assign(window.vinylView,{
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
  swapToy, get phonograph(){return phonograph},
  fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, setQuality:m=>post.setMode(m),
- fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
+ fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, knobPoint(){const k=phonograph.getObjectByName('volume-knob');if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},
  beginInspection, returnRecord, finishInspection, flyTo, snapToDefault, defaultPose, presentPose,
  keepBelowCeiling, keepInRoom, armSwapFromSleeve, captureExtract, keepDiscAwayFromCamera, roomBounds,
@@ -1870,6 +1933,7 @@ Object.defineProperties(window.vinylView,{ // live getters (Object.assign would 
  reframeLog:{get(){return reframeLog.slice();}},
  perf:{get(){const gl=renderer.getContext();return {log:perfLog.slice(),buffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],dpr:renderer.getPixelRatio(),post:post.state(),shadowRenders};}},
  keys:{get(){return {press:{...keyFx.press},glow:{...keyFx.glow},hover:keyFx.hover};}},
+ knob:{get(){return {shown:knobFx.shown,level:knobLevel(),dragging:!!knobFx.drag,angle:phonograph.getObjectByName('knob-turn')?.rotation.y??null};}},
  hover:{get(){return {id:hov.id,shown:!!hoverEl?.classList.contains('on'),x:hov.x,y:hov.y,title:hoverEl?.firstElementChild?.textContent||'',artist:hoverEl?.lastElementChild?.textContent||''};}},
  nowPlayingKey:{get(){return NOW.key;}}});
 Object.defineProperty(window.vinylView,'R',{get(){return R;}});
