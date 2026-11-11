@@ -7,9 +7,9 @@ const require=createRequire(import.meta.url);const {_electron}=require(process.e
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),data=fs.mkdtempSync(path.join(os.tmpdir(),'dp-knob-'));
 fs.writeFileSync(path.join(data,'settings.json'),JSON.stringify({volume:.5,bounds:{x:560,y:330,width:440,height:393}}));
 const exe=process.env.DESK_EXE;let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
-const app=await _electron.launch({executablePath:exe||require(path.join(root,'node_modules','electron')),args:[...(exe?[]:[root]),'--no-sandbox','--use-gl=angle','--use-angle=swiftshader'],env:{...process.env,DESK_PHONO_DATA:data}});
+const app=await _electron.launch({executablePath:exe||require(path.join(root,'node_modules','electron')),args:[...(exe?[]:[root]),'--no-sandbox','--use-gl=angle','--use-angle=swiftshader'],env:{...process.env,DESK_PHONO_DATA:data,DESK_PHONO_TEST:"1"}});
 const page=await app.firstWindow();await page.waitForSelector('canvas[data-ready]',{state:'attached',timeout:90000});
-const wait=ms=>page.waitForTimeout(ms),R=(f,a)=>page.evaluate(f,a),bounds=()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getBounds());
+const wait=ms=>page.waitForTimeout(ms),R=(f,a)=>page.evaluate(f,a),bounds=()=>app.evaluate(()=>({...global.__deskPhono.pet})); // the pet's own rect (the window is the pet plus headroom)
 const settings=()=>JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));
 await R(p=>window.vinyl.openPaths([p]),path.resolve(process.argv[2]));await page.waitForFunction(()=>window.vinyl.buffer,null,{timeout:60000});await wait(2500);
 const k=await R(()=>window.vinylView.knobPoint());ok(!!k,`the knob is on the cabinet front (${k&&Math.round(k.x)},${k&&Math.round(k.y)})`);

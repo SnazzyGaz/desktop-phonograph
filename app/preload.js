@@ -4,7 +4,8 @@ const on=(ch,fn)=>{const h=(e,...a)=>fn(...a);ipcRenderer.on(ch,h);return ()=>ip
 contextBridge.exposeInMainWorld('desk',{
  solid:s=>ipcRenderer.send('pet:solid',!!s),
  moveStart:(x,y)=>ipcRenderer.send('pet:move-start',x,y),move:(x,y)=>ipcRenderer.send('pet:move',x,y),moveEnd:()=>ipcRenderer.send('pet:move-end'),
- resize:(dir,fx,fy)=>ipcRenderer.send('pet:resize',dir,fx,fy),
+ zoomTo:rect=>ipcRenderer.invoke('pet:zoom-to',rect),
+ stageGet:()=>ipcRenderer.invoke('pet:stage'),onStage:fn=>on('pet:stage',fn),
  menu:state=>ipcRenderer.invoke('pet:menu',state),
  settings:()=>ipcRenderer.invoke('pet:settings'),set:patch=>ipcRenderer.send('pet:set',patch),
  clipboard:()=>ipcRenderer.invoke('pet:clipboard'),

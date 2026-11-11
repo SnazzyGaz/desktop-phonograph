@@ -2,6 +2,8 @@
    Click-through: the page reads the alpha of the pixels under the cursor (a small padded
    square, the way the Beacons' HitPad grows the silhouette) and tells the main process
    whether that spot is solid; empty pixels let the click fall through to the desktop.
+   The window covers the screen's work area (see the stage in view.js); everything but the pet's
+   solid pixels clicks through.
    Gestures: left-drag on the body/base moves the window (arm, record, sleeves, toy keep
    their own clicks first), scroll resizes, right-click opens the menu. The machine stays in
    one fixed three-quarter pose; only Inspect (double-click the record) turns and zooms. */
@@ -36,8 +38,9 @@ function solidAt(x,y){
  const el=document.elementFromPoint(x,y);
  if(el&&el!==document.body&&el.tagName!=='CANVAS'&&!el.closest('#view'))return true; // the bubble and other page bits
  const r=V()?.renderer;if(!r)return false;
- const gl=r.getContext(),dpr=r.getPixelRatio(),c=r.domElement;
- const cx=Math.round(x*dpr),cy=Math.round(c.height-y*dpr),n=2*PAD+1;
+ const gl=r.getContext(),c=r.domElement,b=c.getBoundingClientRect();
+ if(x<b.left||y<b.top||x>=b.right||y>=b.bottom||!b.width||!b.height)return false; // the window's empty headroom
+ const cx=Math.round((x-b.left)/b.width*c.width),cy=Math.round(c.height-(y-b.top)/b.height*c.height),n=2*PAD+1;
  const x0=Math.max(0,cx-PAD),y0=Math.max(0,cy-PAD),w=Math.min(c.width,cx+PAD+1)-x0,h=Math.min(c.height,cy+PAD+1)-y0;
  if(w<=0||h<=0)return false;
  try{gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.readPixels(x0,y0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,px);}catch{return true;}
@@ -45,7 +48,9 @@ function solidAt(x,y){
  return false;
 }
 function setSolid(s){if(s!==solid){solid=s;D.solid(s);}}
-function test(){hitT=0;if(holding||lastX<0){return;}setSolid(!!V()?.inspect?.active||!!V()?.fanActive||solidAt(lastX,lastY));} // inspecting: the whole (grown) window takes the clicks, so a click beside the record puts it back
+function test(){hitT=0;if(holding||lastX<0){return;}const v=V();
+ if(v?.inspect?.active||v?.fanActive){const b=v.renderer.domElement.getBoundingClientRect();setSolid(lastX>=b.left&&lastX<b.right&&lastY>=b.top&&lastY<b.bottom);return;} // inspecting or fanned: the canvas round the pet takes the clicks (a click beside the record puts it back), the rest of the screen does not
+ setSolid(solidAt(lastX,lastY));}
 document.addEventListener('mousemove',e=>{lastX=e.clientX;lastY=e.clientY;if(!hitT)hitT=setTimeout(test,30);},{passive:true});
 document.addEventListener('mouseleave',()=>{lastX=-1;if(!holding)setSolid(false);});
 // After the picture changes under a still cursor (it turned, a record arrived) re-test now and then.
@@ -75,18 +80,13 @@ view.addEventListener('pointerdown',e=>{
  if(e.button===2)right={x:e.clientX,y:e.clientY,moved:false,e};
 },{capture:true});
 window.addEventListener('pointerup',()=>{if(!mv)holding=false;},{capture:false});
-window.addEventListener('pointermove',e=>{if(right&&Math.hypot(e.clientX-right.x,e.clientY-right.y)>6)right.moved=true;});
+window.addEventListener('pointermove',e=>{if(right&&(e.buttons&2)&&Math.hypot(e.clientX-right.x,e.clientY-right.y)>6)right.moved=true;}); // only a move with the button held is a drag (not a stray hover move)
 function rightUp(e){if(e.button!==2||!right)return;const r=right;right=null;if(!r.moved)openMenu(r.e);}
 window.addEventListener('contextmenu',e=>e.preventDefault());
 
 /* ---------- scroll = size ---------- */
-let wheelAcc=0,wheelT=0;
-function wheel(e){
- wheelAcc+=e.deltaY*(e.deltaMode===1?33:1);
- if(Math.abs(wheelAcc)<60)return;const dir=Math.sign(wheelAcc);wheelAcc=0;
- const now=performance.now();if(now-wheelT<45)return;wheelT=now;
- D.resize(dir,e.clientX/innerWidth,e.clientY/innerHeight);
-}
+// view.js scales the pet smoothly while the wheel turns and settles its size once (zoomWheel)
+function wheel(e){V()?.zoomWheel?.(e);}
 
 /* ---------- the right-click menu ---------- */
 async function openMenu(e){

@@ -69,11 +69,35 @@ function firstBounds(){
  const wa=screen.getPrimaryDisplay().workArea,w=440,h=Math.round(w/ASPECT);
  return {x:wa.x+wa.width-w-60,y:wa.y+wa.height-h-30,width:w,height:h};
 }
-let bounds=null; // our own idea of the bounds (DIP); setBounds with a fixed size so crossing a monitor never resizes it
-function place(b,save=true){bounds={x:Math.round(b.x),y:Math.round(b.y),width:Math.round(b.width),height:Math.round(b.height)};win?.setBounds(bounds);if(save){settings.bounds={...bounds};saveSettings();}}
+let bounds=null; // the pet's own rect on screen (DIP); what is saved, sized and kept on screen
+/* The stage: the window covers the work area of the screen the pet is on (transparent; empty pixels
+   click through) and the page draws the pet where it is. So scroll-to-size, the fan, Inspect, the
+   sleeves and dragging within a screen never resize or move the window (nothing can jump or blank);
+   only crossing to another screen moves it. A stage exactly the size of the whole monitor (taskbar
+   hidden) is kept 1 px smaller so Windows never takes it for a full-screen app. */
+let stage=null,off={x:0,y:0};const stageStats={setBounds:0,moved:0,resized:0};
+function stageFor(b){
+ const d=screen.getDisplayNearestPoint({x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}),wa={...d.workArea},db=d.bounds;
+ if(wa.x===db.x&&wa.y===db.y&&wa.width===db.width&&wa.height===db.height){wa.x++;wa.y++;wa.width-=2;wa.height-=2;}
+ return wa;
+}
+function layout(){return {ox:off.x,oy:off.y,w:bounds.width,h:bounds.height,min:MIN,max:MAX,aspect:ASPECT};}
+function setStage(s,quiet){
+ const cur=win&&!win.isDestroyed()?win.getBounds():stage; // (the real window: something else may have moved it)
+ if(!stage||!cur||s.x!==cur.x||s.y!==cur.y||s.width!==cur.width||s.height!==cur.height){
+  if(stage&&(s.width!==stage.width||s.height!==stage.height))stageStats.resized++;else if(stage)stageStats.moved++;
+  stage={...s};stageStats.setBounds++;win?.setBounds(stage);}
+ const o={x:bounds.x-stage.x,y:bounds.y-stage.y},sized=bounds.width!==off.w||bounds.height!==off.h;
+ if(o.x!==off.x||o.y!==off.y||sized){off={...o,w:bounds.width,h:bounds.height};if(!quiet)send('pet:stage',layout());}
+}
+function place(b,save=true,opt={}){
+ bounds={x:Math.round(b.x),y:Math.round(b.y),width:Math.round(b.width),height:Math.round(b.height)};
+ setStage(stageFor(bounds),opt.quiet);
+ if(save){settings.bounds={...bounds};saveSettings();}
+}
 function createWindow(){
- const b=firstBounds();bounds=b;
- win=new BrowserWindow({...b,frame:false,transparent:true,backgroundColor:'#00000000',resizable:false,maximizable:false,minimizable:false,fullscreenable:false,
+ const b=firstBounds();bounds=b;stage=stageFor(b);off={x:b.x-stage.x,y:b.y-stage.y,w:b.width,h:b.height};
+ win=new BrowserWindow({...stage,frame:false,transparent:true,backgroundColor:'#00000000',resizable:false,maximizable:false,minimizable:false,fullscreenable:false,
   hasShadow:false,skipTaskbar:true,alwaysOnTop:settings.onTop,show:false,title:'Desk Phonograph',icon:iconPath(),
   webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:true,spellcheck:false}});
  if(settings.onTop)win.setAlwaysOnTop(true,'floating');
@@ -96,29 +120,13 @@ ipcMain.on('pet:solid',(e,solid)=>{if(!win)return;const ig=!solid;if(ig!==ignori
 
 /* ---------- moving: Beacons-style drag + fling ---------- */
 let mv=null,fling=null;
-// Inspecting: the window grows round the pet (inside its screen) so a record brought close never meets its edges.
+// Inspecting or fanning: no window drags (the page draws in the headroom round the pet).
 let room=null;
-// Before the window is resized the renderer blanks itself (see reframe() in view.js); the OS keeps
-// showing the window's last picture while it resizes, so wait until that picture really is the blank one.
-async function blankShown(limit=500){
- const t0=Date.now();
- while(Date.now()-t0<limit&&win&&!win.isDestroyed()){
-  try{const img=await win.webContents.capturePage(),b=img.toBitmap(),{width:w,height:h}=img.getSize();let lit=0;
-   for(let y=2;y<h;y+=5)for(let x=2;x<w;x+=5){const i=(y*w+x)*4;if(b[i+3]>8&&Math.max(b[i],b[i+1],b[i+2])>12&&++lit>3)break;}
-   if(lit<=3)return true;}catch{return false;}
-  await new Promise(r=>setTimeout(r,12));
- }
- return false;
-}
-ipcMain.handle('pet:inspect-room',(e,step)=>{
- if(!win||win.isDestroyed())return null;
- if(step==='plan'){const b=bounds,wa=screen.getDisplayMatching(b).workArea;
-  const x0=Math.max(wa.x,b.x-b.width),y0=Math.max(wa.y,b.y-Math.round(b.height*.9)),x1=Math.min(wa.x+wa.width,b.x+b.width*2),y1=Math.min(wa.y+wa.height,b.y+Math.round(b.height*1.9));
-  room={x:x0,y:y0,width:x1-x0,height:y1-y0};return {w0:b.width,h0:b.height,ox:b.x-x0,oy:b.y-y0,w:room.width,h:room.height};}
- if(step==='grow'&&room){stopFling();mv=null;return blankShown().then(()=>{if(room&&win&&!win.isDestroyed()){win.setBounds(room);log('inspect room',JSON.stringify(room));}return true;});}
- if(step==='shrink'){room=null;return blankShown().then(()=>{if(win&&!win.isDestroyed()&&!room)win.setBounds(bounds);return true;});}
- return null;
+ipcMain.handle('pet:inspect-room',(e,step)=>{ // the page uses its headroom; here it only stops drags meanwhile
+ if(step==='grow'){room=true;stopFling();mv=null;}else if(step==='shrink')room=null;
+ return true;
 });
+ipcMain.handle('pet:stage',()=>bounds?layout():null);
 ipcMain.on('pet:move-start',(e,sx,sy)=>{if(room)return;stopFling();mv={sx,sy,x0:bounds.x,y0:bounds.y,trail:[{x:sx,y:sy,t:Date.now()}]};});
 ipcMain.on('pet:move',(e,sx,sy)=>{if(!mv)return;const now=Date.now();mv.trail.push({x:sx,y:sy,t:now});while(mv.trail.length>2&&now-mv.trail[0].t>90)mv.trail.shift();
  place({x:mv.x0+sx-mv.sx,y:mv.y0+sy-mv.sy,width:bounds.width,height:bounds.height},false);});
@@ -144,13 +152,12 @@ function startFling(vx,vy){
  },16);
 }
 
-/* ---------- resizing: scroll, anchored at the cursor's point in the window ---------- */
-ipcMain.on('pet:resize',(e,dir,fx,fy)=>{
- const k=Math.pow(1.08,-Math.sign(dir)),w=Math.max(MIN,Math.min(MAX,Math.round(bounds.width*k))),h=Math.round(w/ASPECT);
- if(w===bounds.width)return;
- fx=Number.isFinite(fx)?Math.max(0,Math.min(1,fx)):.5;fy=Number.isFinite(fy)?Math.max(0,Math.min(1,fy)):.5;
- const ax=bounds.x+bounds.width*fx,ay=bounds.y+bounds.height*fy;
- place(keepOnScreen({x:ax-w*fx,y:ay-h*fy,width:w,height:h}));
+/* ---------- resizing: the page scales the pet while the wheel turns, then sends its new rect once ---------- */
+ipcMain.handle('pet:zoom-to',(e,r)=>{
+ if(!stage||!r)return bounds?layout():null;
+ const w=Math.max(MIN,Math.min(MAX,Math.round(r.w))),h=Math.round(w/ASPECT);
+ stopFling();place(keepOnScreen({x:stage.x+Math.round(r.ox),y:stage.y+Math.round(r.oy),width:w,height:h}),true,{quiet:true});
+ return layout();
 });
 
 /* ---------- tray + menus ---------- */
@@ -407,7 +414,7 @@ ipcMain.on('pet:log',(e,...a)=>log('page',...a.map(String)));
 
 /* ---------- life cycle ---------- */
 // Tests only (never set in normal use): reach the menus as built, and stand in a fake clipboard.
-if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;}};
+if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get pet(){return bounds;},get stage(){return stage;},stageStats};
 app.on('second-instance',()=>{if(win){if(!win.isVisible())toggleShown();}});
 app.whenReady().then(()=>{
  Menu.setApplicationMenu(null);

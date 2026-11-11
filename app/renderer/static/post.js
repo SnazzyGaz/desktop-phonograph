@@ -38,6 +38,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
  let userCap=Infinity,budget=Infinity,lite=false;
  // a caller's ceiling replaces the tier's own; a pixel budget lowers it further on big windows (never below 1)
  const cap=()=>Math.min(userCap<Infinity?userCap:dprCap,budget<Infinity?Math.max(1,Math.sqrt(budget/Math.max(1,w*h))):Infinity);
+ let pendingDpr=null,pendingBuild=false; // applied at the start of the next render, never between a draw and its paint
  let mode='auto',tier='high',composer=null,gtao=null,bloom=null,lens=null,dof=null,focusMM=600,w=1,h=1,dprCap=2,dpr=1;
  try{const saved=localStorage.getItem(storageKey);if(saved&&['auto',...TIERS].includes(saved))mode=saved;}catch{}
  // A weak/mobile GPU starts lower; 'auto' adapts from there.
@@ -86,7 +87,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
  }
  function resize(width,height){
   w=Math.max(1,width|0);h=Math.max(1,height|0);
-  {const want=Math.min(devicePixelRatio||1,cap());if(dpr>want+.01){dpr=want;renderer.setPixelRatio(dpr);}} // a bigger window may not exceed the pixel budget
+  {const want=Math.min(devicePixelRatio||1,cap());if(dpr>want+.01){dpr=want;renderer.setPixelRatio(dpr);}} // a bigger canvas may not exceed the pixel budget (callers draw right after)
   renderer.setSize(w,h,false);
   if(composer){composer.setPixelRatio(dpr);composer.setSize(w,h);}
  }
@@ -99,12 +100,21 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
   if(samples.length<(samples.some(x=>x>60)?12:45))return; // badly slow frames: react after a dozen, not 45
   samples.sort((a,b)=>a-b);const med=samples[samples.length>>1];samples=[];
   if(med>24){ // slow: shave resolution first, then drop a tier
-   if(dpr>1.01){dpr=Math.max(1,dpr-.25);renderer.setPixelRatio(dpr);resize(w,h);}
-   else{const i=TIERS.indexOf(tier);if(i>0){tier=TIERS[i-1];build();onChange?.(state());}}
+   if(dpr>1.01)later(Math.max(1,dpr-.25));
+   else{const i=TIERS.indexOf(tier);if(i>0){tier=TIERS[i-1];pendingBuild=true;onChange?.(state());}}
    cool=20;
-  }else if(med<11&&dpr<Math.min(devicePixelRatio||1,cap())-.01){dpr=Math.min(cap(),dpr+.25);renderer.setPixelRatio(dpr);resize(w,h);cool=60;}
+  }else if(med<11&&dpr<Math.min(devicePixelRatio||1,cap())-.01){later(Math.min(cap(),dpr+.25));cool=60;}
+ }
+ // Changing the pixel ratio resizes the canvas, and a resized canvas is cleared. Done after a draw
+ // (adapt runs after render) the screen got an empty canvas until something else drew: a flash.
+ // So changes wait for the next render and are applied just before it draws.
+ function later(d){pendingDpr=d;onChange?.(state());}
+ function applyPending(){
+  if(pendingBuild){pendingBuild=false;build();}
+  if(pendingDpr!=null){const d=pendingDpr;pendingDpr=null;if(Math.abs(d-dpr)>.01){dpr=d;renderer.setPixelRatio(dpr);resize(w,h);}}
  }
  function render(now=performance.now()){
+  applyPending();
   if(lens)lens.uniforms.uTime.value=(now%10000)/1000;
   if(composer)composer.render();else renderer.render(scene,camera);
   adapt(now);
@@ -112,14 +122,14 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
  function focus(mm){focusMM=mm;if(dof)dof.uniforms.focus.value=mm;}
  function setMode(m){
   if(!['auto',...TIERS].includes(m))return;mode=m;try{localStorage.setItem(storageKey,m);}catch{}
-  tier=m==='auto'?(weak?'balanced':'high'):m;samples=[];build();onChange?.(state());
+  tier=m==='auto'?(weak?'balanced':'high'):m;samples=[];pendingBuild=true;onChange?.(state());
  }
  // A caller's ceiling on the pixel ratio (the desk pet: 1.25 normally, full in inspect).
- function setDprCap(c,pixels=Infinity){userCap=c>0?c:Infinity;budget=pixels>0?pixels:Infinity;const next=Math.min(devicePixelRatio||1,cap());if(Math.abs(next-dpr)>.01){dpr=next;renderer.setPixelRatio(dpr);resize(w,h);}}
+ function setDprCap(c,pixels=Infinity){userCap=c>0?c:Infinity;budget=pixels>0?pixels:Infinity;const next=Math.min(devicePixelRatio||1,cap());if(Math.abs(next-dpr)>.01)later(next);}
  // Lite: skip ambient occlusion, depth of field and bloom (the pet's inspect: a record held up against nothing)
  function applyLite(){if(gtao)gtao.enabled=!lite;if(dof)dof.enabled=!lite;if(bloom)bloom.enabled=!lite;}
  function setLite(on){lite=!!on;applyLite();}
- function state(){return {mode,tier,dpr,lite};}
+ function state(){return {mode,tier,dpr:pendingDpr??dpr,lite};}
  // Pause adaptation across idle gaps (render-on-demand leaves long pauses).
  function idle(){lastDrawn=0;}
  build();

@@ -120,7 +120,7 @@ const camDist=()=>camera.position.distanceTo(controls.target);
 controls._handleMouseWheel=function(e){
  if(PET&&fan.on){fanScroll(Math.sign(e.deltaY));return;}
 if(PET&&!inspect.active){const pk=pickAt(e);if(pk?.kind==='knob'){knobWheel(e);return;} // over the knob the wheel turns it, it doesn't size the pet
-if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}window.petShell?.wheel(e);return;}
+if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}zoomWheel(e);return;}
  if(camTween&&!inspect.active)camTween=null;
  const lo=Math.log(controls.minDistance),hi=Math.log(controls.maxDistance);
  if(zoom.goal===null){zoom.goal=Math.log(camDist());zoom.vel=0;}
@@ -1203,7 +1203,7 @@ function setDetail(on){
  const top=disc.getObjectByName('vinyl-grooves');if(!top)return;
  top.material.envMapIntensity=on?VINYL_ENV_HELD:VINYL_ENV;invalidate();
 }
-const INSPECT_IN=1.0,INSPECT_OUT=.95,INSPECT_PIXELS=1.1e6; // drawing-buffer pixels while inspecting
+const INSPECT_IN=1.0,INSPECT_OUT=.95;
 function beginInspection(){
  const v=window.vinyl;if(!v.record||inspect.active||!disc.getObjectByName('vinyl-grooves'))return;
  v.setInspecting(true);drag=false;armHold=null;sleeveDrag=null;sleevePop=null;dropIn=null;disc.position.set(0,0,0);
@@ -1212,62 +1212,104 @@ function beginInspection(){
  inspect.from=disc.position.clone();inspect.qFrom=disc.quaternion.clone();
  inspect.held=new THREE.Vector3(-R*.35,-R*2.8,R*1.6);
  inspect.eye=inspect.held.clone().add(new THREE.Vector3(R*.15,-R*2.9,R*1.7));
+ if(PET){ // the pet: the camera never moves (so the machine never shifts or grows); the record is brought to the eye,
+  // on the line of sight through the middle of the pet, near enough to fill about the pet's height
+  const eye=camera.position.clone(),dir=controls.target.clone().sub(eye).normalize(),d=R/(.95*Math.tan(camera.fov*Math.PI/360));
+  const heldW=eye.clone().addScaledVector(dir,d),par=disc.parent;par?.updateMatrixWorld(true);
+  inspect.heldWorld=heldW;inspect.held=par?par.worldToLocal(heldW.clone()):heldW.clone();inspect.eye=par?par.worldToLocal(eye.clone()):eye;} // the disc moves in its parent's space
  inspect.qHeld=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),inspect.eye.clone().sub(inspect.held).normalize());
  inspect.qHeld.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),.48));
  controls.enabled=false;
  if(PET){if(fan.on)fanClose(true);petRoom(true,'inspect');}
- flyTo(inspect.eye,inspect.held,INSPECT_IN,()=>{if(inspect.active&&inspect.phase==='out'){inspect.phase='held';loosenInspectCamera();}});
+ else flyTo(inspect.eye,inspect.held,INSPECT_IN,()=>{if(inspect.active&&inspect.phase==='out'){inspect.phase='held';loosenInspectCamera();}});
  setDetail(true);syncInspectUI();invalidate();
 }
 function loosenInspectCamera(){
+ if(PET)controls.target.copy(inspect.heldWorld||inspect.held); // on the line of sight already: the view does not change
  controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.minPolarAngle=.02;controls.maxPolarAngle=Math.PI-.02;
- controls.minDistance=R*.65;controls.maxDistance=R*5;controls.enablePan=true;controls.zoomToCursor=true;controls.enabled=true;stopControlMomentum();controls.update();
+ controls.minDistance=R*.65;controls.maxDistance=PET?Math.max(R*5,camDist()*1.6):R*5;controls.enablePan=true;controls.zoomToCursor=true;controls.enabled=true;stopControlMomentum();controls.update();
  if(PET){ // the pet's inspect: the player never turns; drags turn the record in your hands, the wheel only brings it closer
-  controls.enableRotate=false;controls.enablePan=false;controls.zoomToCursor=false;
-  // sharper than the idle pet, but within a pixel budget: the grown window is mostly empty glass,
-  // and full device resolution of all of it made inspect crawl on big or high-DPI screens
-  post.setDprCap?.(1.5,INSPECT_PIXELS);post.setLite?.(true);clampInspectZoom(true);}
+  controls.enableRotate=false;controls.enablePan=false;controls.zoomToCursor=false;controls.maxDistance=Math.max(controls.maxDistance,camDist()*1.6);
+  // the same pixel ratio and effects as the idle pet (no switch, so nothing on screen changes look);
+  // the canvas only covers the pet and a margin round it (see roomRect), so this stays cheap
+  clampInspectZoom(true);}
 }
 /* ---------- the pet's inspect room ----------
    The pet's window is small, so a record brought close would run into its straight edges. While
    inspecting, the window grows around the pet (inside its screen) and the camera keeps the same
    picture in the old rectangle (a view offset), so nothing jumps; the zoom then stops where the
    whole record still fits inside the grown window with a soft margin. */
-let petFrame=null; // {w0,h0,ox,oy,w,h,closing}
-const roomUsers=new Set(); // 'inspect', 'fan': the window stays grown while either needs it
-async function petRoom(on,who='inspect'){
- if(!window.desk?.inspectRoom)return;
- if(on){const had=roomUsers.size>0;roomUsers.add(who);if(had&&petFrame&&!petFrame.closing)return roomQ;
-  const plan=await window.desk.inspectRoom('plan');if(!plan||!roomUsers.has(who))return;petFrame={...plan,closing:false};
-  return reframe('grow',plan.w,plan.h);}
- else{roomUsers.delete(who);if(!roomUsers.size&&petFrame){const f=petFrame;f.closing=true;return reframe('shrink',f.w0,f.h0);}}
+let petFrame=null; // {w0,h0,ox,oy,w,h}: the pet's frame inside a canvas that covers the whole window (room mode)
+/* The stage. The window covers the screen's work area, transparent (empty pixels click through),
+   and the main process tells the page where the pet sits in it (a drag just moves the canvas). Normally the canvas covers just the
+   pet; the fan and Inspect switch it to cover the whole window ("room") and draw the pet at the
+   same screen pixels through a camera view offset. That switch is a page change (one task: restyle,
+   resize the canvas, draw), so the OS window is never resized for it, never blanked, never moved.
+   Scroll-to-size scales the canvas with a CSS transform while the wheel turns and settles once. */
+const stage={ox:0,oy:0,w:0,h:0,min:220,max:1100,aspect:1.12,ready:false};
+const roomUsers=new Set(); // 'inspect', 'fan': the canvas covers the window while either needs it
+let roomOn=false;const stageLog=[];
+function applyStage(s){
+ if(!s)return;const sized=!stage.ready||s.w!==stage.w||s.h!==stage.h;Object.assign(stage,s,{ready:true});
+ const st=document.documentElement.style;
+ st.setProperty('--px',stage.ox+'px');st.setProperty('--py',stage.oy+'px');st.setProperty('--pw',stage.w+'px');st.setProperty('--ph',stage.h+'px');
+ if(sized){stageLog.push({t:performance.now(),...s});if(stageLog.length>40)stageLog.shift();}
+ // a drag only moves the canvas (a compositor move; nothing is redrawn); a new size re-lays it and draws at once
+ if(sized||roomOn)resize();else if(hov.id)showTitle();
 }
-/* Growing or shrinking the window must not show the pet anywhere else, even for a frame. When the
-   OS resizes a window it keeps showing the last picture, pinned to the new top-left corner, until a
-   new one arrives; and the first new one used to come before the camera knew the new size. So:
-   hide the page and let that blank picture reach the screen, resize, wait until the canvas has the
-   new size, set the camera (view offset) and draw at once, and only then show it again. Requests
-   queue so a grow and a shrink never interleave. */
-let roomQ=Promise.resolve(),reframing=false;const reframeLog=[];
-const nextPaint=()=>new Promise(r=>{let done=false;const t=setTimeout(()=>{done=true;r();},60);requestAnimationFrame(()=>{if(!done){clearTimeout(t);r();}});});
-function reframe(step,w,h){
- const run=async()=>{
-  const root=document.documentElement,T0=performance.now(),L={step,w,h};root.classList.add('reframing');reframing=true;
-  try{
-   // a real, empty WebGL frame (a CSS change alone isn't always handed to the screen)
-   {renderer.setRenderTarget(null);const cc=renderer.getClearColor(new THREE.Color()),ca=renderer.getClearAlpha();renderer.setClearColor(0x000000,0);renderer.clear(true,true,true);renderer.setClearColor(cc,ca);}
-   await nextPaint();await nextPaint();await nextPaint(); // the blank picture has been handed to the screen
-   while(performance.now()-T0<(window.__reframeHold||50))await nextPaint();
-   L.hidden=performance.now()-T0;await window.desk.inspectRoom(step);L.resized=performance.now()-T0;
-   const t0=performance.now();
-   while(performance.now()-t0<800&&!(Math.abs(view.clientWidth-w)<3&&Math.abs(view.clientHeight-h)<3))await nextPaint();
-   L.sized=performance.now()-T0;L.got=[view.clientWidth,view.clientHeight];
-   resize();scene.updateMatrixWorld();drawFrame(performance.now());lastDrawAt=performance.now();
-   await nextPaint();L.drawn=performance.now()-T0;
-  }catch(e){console.warn('reframe',e);L.error=String(e);}
-  finally{reframing=false;root.classList.remove('reframing');invalidate(3);reframeLog.push(L);if(reframeLog.length>20)reframeLog.shift();}
- };
- return roomQ=roomQ.then(run,run);
+let roomBox={x:0,y:0,w:0,h:0};
+function roomRect(){ // window coordinates of the canvas in room mode: the pet and what the fan or the held record needs round it
+ const only=roomUsers.size===1&&roomUsers.has('inspect'),mx=Math.round(stage.w*(only?.3:1)),my=Math.round(stage.h*(only?.3:.9)),x=Math.max(0,stage.ox-mx),y=Math.max(0,stage.oy-my);
+ return {x,y,w:Math.min(innerWidth,stage.ox+stage.w+mx)-x,h:Math.min(innerHeight,stage.oy+stage.h+my)-y};
+}
+function petRoom(on,who='inspect'){
+ if(on)roomUsers.add(who);else roomUsers.delete(who);
+ const want=roomUsers.size>0,r=want?roomRect():null;
+ if(want!==roomOn||(r&&(r.x!==roomBox.x||r.y!==roomBox.y||r.w!==roomBox.w||r.h!==roomBox.h))){
+  if(zoomG.on)zoomSettle(true);
+  if(want!==roomOn)window.desk?.inspectRoom?.(want?'grow':'shrink'); // main only notes it (no window drags meanwhile)
+  roomOn=want;
+  if(r){roomBox=r;const st=document.documentElement.style;st.setProperty('--rx',r.x+'px');st.setProperty('--ry',r.y+'px');st.setProperty('--rw',r.w+'px');st.setProperty('--rh',r.h+'px');}
+  document.documentElement.classList.toggle('room',want);
+  resize();
+ }
+ return Promise.resolve();
+}
+/* ---------- scroll = size (the pet) ----------
+   Each notch multiplies a target size by 1.08; the canvas follows on an eased CSS scale anchored at
+   the cursor (no setBounds, no canvas resize, nothing redrawn for it). ~200 ms after the wheel stops
+   and the scale has arrived, the pet's new rect goes to the main process once and the canvas is
+   re-laid at its real size in the same task as its first draw. */
+const zoomG={on:false,s:1,target:1,base:null,ax:0,ay:0,last:0,raf:0,settling:false,t:0};
+function zoomWheel(e){
+ if(!PET||!stage.ready||roomOn)return;
+ const d=e.deltaY*(e.deltaMode===1?33:1);if(!d)return;
+ if(zoomG.settling)return;
+ if(!zoomG.on){zoomG.on=true;zoomG.base={...stage};zoomG.s=zoomG.target=1;zoomG.ax=e.clientX;zoomG.ay=e.clientY;zoomG.t=performance.now();
+  const v=view.style;v.transformOrigin=`${zoomG.ax-stage.ox}px ${zoomG.ay-stage.oy}px`;v.willChange='transform';}
+ const b=zoomG.base,lo=stage.min/b.w,hi=stage.max/b.w;
+ zoomG.target=Math.max(lo,Math.min(hi,zoomG.target*Math.pow(1.08,-Math.max(-3,Math.min(3,d/100)))));
+ zoomG.last=performance.now();
+ if(!zoomG.raf)zoomG.raf=requestAnimationFrame(zoomTick);
+}
+function zoomRect(s){const b=zoomG.base,w=Math.round(b.w*s),h=Math.round(w/stage.aspect);
+ return {ox:Math.round(zoomG.ax-(zoomG.ax-b.ox)*w/b.w),oy:Math.round(zoomG.ay-(zoomG.ay-b.oy)*h/b.h),w,h};}
+function zoomTick(now){
+ zoomG.raf=0;if(!zoomG.on)return;
+ const dt=Math.min(.05,Math.max(.001,(now-(zoomG.tl||now))/1000));zoomG.tl=now;
+ const a=Math.log(zoomG.s),b=Math.log(zoomG.target),k=1-Math.exp(-dt*16);let n=a+(b-a)*k;if(Math.abs(b-n)<.002)n=b;
+ zoomG.s=Math.exp(n);view.style.transform=`scale(${zoomG.s})`;
+ if(zoomG.s===zoomG.target&&now-zoomG.last>200){zoomG.tl=0;zoomSettle();return;}
+ zoomG.raf=requestAnimationFrame(zoomTick);
+}
+async function zoomSettle(now=false){
+ if(!zoomG.on||zoomG.settling)return;
+ if(zoomG.raf){cancelAnimationFrame(zoomG.raf);zoomG.raf=0;}
+ const r=zoomRect(now?zoomG.s:zoomG.target);zoomG.settling=true;
+ const end=s=>{const v=view.style;v.transform='';v.transformOrigin='';v.willChange='';zoomG.on=false;zoomG.settling=false;zoomG.tl=0;if(s)applyStage(s);else resize();
+  const L=stageLog[stageLog.length-1];if(L)L.zoom=performance.now()-zoomG.t;};
+ if(r.w===zoomG.base.w){end(null);return;}
+ try{const s=await window.desk.zoomTo(r);end(s);}catch(e){console.warn('zoom',e);end(null);}
 }
 // How close the camera may come: the record (a sphere of its radius) stays inside the drawable area.
 function inspectFitDistance(){
@@ -1280,7 +1322,7 @@ function inspectFitDistance(){
 }
 function clampInspectZoom(pushBack=false){
  if(!PET||!inspect.active||inspect.phase!=='held')return;
- const d=inspectFitDistance();controls.minDistance=d;controls.maxDistance=Math.max(d*2.4,R*5);
+ const d=inspectFitDistance();controls.minDistance=d;controls.maxDistance=Math.max(d*2.4,R*5,PET?camDist()*1.6:0); // the pet holds it where the camera already is: never pulled in
  if(pushBack){const off=camera.position.clone().sub(controls.target);if(off.length()<d){camera.position.copy(controls.target).add(off.setLength(d));}controls.update();}
  invalidate();
 }
@@ -1288,7 +1330,9 @@ function returnRecord(){
  if(!inspect.active||inspect.phase==='back')return;
  if(PET){controls.minDistance=R*.65;controls.maxDistance=R*8;}
  inspect.phase='back';inspect.elapsed=0;inspect.drag=null;inspect.from=disc.position.clone();inspect.qFrom=disc.quaternion.clone();controls.enabled=false;
- {const back=inspect.saved||defaultPose();flyTo(back.pos,back.target,INSPECT_OUT);}
+ {const back=inspect.saved||defaultPose();
+  if(PET&&camera.position.distanceTo(back.pos)<.01){controls.target.copy(back.target);controls.update();} // it never moved: just aim the controls back
+  else flyTo(back.pos,back.target,INSPECT_OUT);}
  invalidate();
 }
 function finishInspection(replacing=false){
@@ -1296,7 +1340,7 @@ function finishInspection(replacing=false){
  inspect.active=false;inspect.phase='idle';inspect.drag=null;disc.position.set(0,0,0);disc.rotation.set(0,0,window.vinyl.state.rotation);controls.enabled=true;
  if(!replacing)setDetail(false);
  machineClamps();
- if(replacing&&inspect.saved){const s=inspect.saved;flyTo(s.pos,s.target,.7);} // new record mid-inspection: still go back to the viewer's seat
+ if(replacing&&inspect.saved){const s=inspect.saved;if(PET&&camera.position.distanceTo(s.pos)<.01)controls.target.copy(s.target);else flyTo(s.pos,s.target,.7);} // new record mid-inspection: still go back to the viewer's seat
  if(PET)petRoom(false,'inspect');
  window.vinyl.setInspecting(false);syncInspectUI();invalidate();
 }
@@ -1761,14 +1805,19 @@ renderer.domElement.addEventListener('dblclick',e=>{if(e.button!==0)return;
 renderer.domElement.addEventListener('pointercancel',e=>{if(endPointer(e,true))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 // Narrow (portrait) views widen the lens instead of moving the viewer, so the whole machine stays in frame.
 const BASE_FOV=38,BASE_ASPECT=1.25;
-function resize(){const w=view.clientWidth,h=view.clientHeight;
- const f=petFrame&&Math.abs(w-petFrame.w)<3&&Math.abs(h-petFrame.h)<3&&!petFrame.closing?petFrame:null;
- if(petFrame?.closing&&Math.abs(w-petFrame.w0)<3&&Math.abs(h-petFrame.h0)<3)petFrame=null;
+function resize(){const w=view.clientWidth,h=view.clientHeight;if(!w||!h)return;
+ const f=PET&&roomOn&&stage.ready?{w0:stage.w,h0:stage.h,ox:stage.ox-roomBox.x,oy:stage.oy-roomBox.y,w,h}:null;petFrame=f;
  camera.aspect=(f?f.w0/f.h0:w/Math.max(1,h));
  camera.fov=camera.aspect>=BASE_ASPECT?BASE_FOV:Math.min(62,2*Math.atan(Math.tan(BASE_FOV*Math.PI/360)*BASE_ASPECT/camera.aspect)*180/Math.PI);
  if(f)camera.setViewOffset(f.w0,f.h0,-f.ox,-f.oy,w,h);else camera.clearViewOffset();
- camera.updateProjectionMatrix();clampInspectZoom(true);post.resize(w,h);if(fan.on&&!fan.closing){fan.depth=0;layoutFan();}if(hov.id)showTitle();invalidate();} // passes read the updated projection
+ const c=renderer.domElement,before=c.width+'x'+c.height;
+ camera.updateProjectionMatrix();clampInspectZoom(true);if(w!==lastPostW||h!==lastPostH){lastPostW=w;lastPostH=h;post.resize(w,h);}if(fan.on&&!fan.closing){fan.depth=0;layoutFan();}if(hov.id)showTitle();invalidate();
+ // a resized canvas is empty: draw it now, in this task, so the screen never gets the empty one
+ if(resizeReady&&firstDrawn&&c.width+'x'+c.height!==before){scene.updateMatrixWorld();drawFrame(performance.now());lastDrawAt=performance.now();resizeDraws++;}
+} // passes read the updated projection
+let resizeDraws=0,resizeReady=false,lastPostW=0,lastPostH=0;
 new ResizeObserver(resize).observe(view);resize();
+if(PET&&window.desk?.onStage){window.desk.onStage(applyStage);window.desk.stageGet?.().then(applyStage);}
 function loudness(v,t){
  if(!v.down||v.state.grabbed)return 0;const b=v.buffer||v.grooveBuffer;if(!b)return 0;
  const ch=b.getChannelData(0),sr=b.sampleRate,c=Math.floor(t*sr),n=Math.floor(sr*.035);let s=0,k=0;
@@ -1796,7 +1845,7 @@ document.addEventListener?.('visibilitychange',()=>invalidate(2));
 // The demo may finish loading while Three.js/room modules are still downloading.
 if(window.vinyl.record)mountRecord(window.vinyl.record);
 sleeveData=window.vinyl.sleeves?.()||sleeveData;currentSleeve=window.vinyl.currentSleeve?.()||null;buildSleeves();syncInspectUI();
-let lastFrame=performance.now(),lastSig=NaN,firstDrawn=false,shadowSig=NaN,shadowAt=-1e9,shadowPending=false;
+let lastFrame=performance.now(),lastSig=NaN,firstDrawn=false,shadowSig=NaN,shadowAt=-1e9,shadowPending=false;resizeReady=true;
 /* Only shadow casters that move count; the disc's spin does not (its shadow is a
    circle). The arm's audio wobble is quantised away; updates are capped at 30 Hz. */
 function shadowSignature(){
@@ -1898,7 +1947,7 @@ function drawFrameInner(nowMs){
 let sleepT=null,rafOn=false,lastDrawAt=0,lastInputAt=0;
 for(const t of ['pointermove','pointerdown','wheel'])renderer.domElement.addEventListener(t,()=>{lastInputAt=performance.now();},{passive:true});
 function frame(){
- rafOn=false;if(reframing)return; // reframe() draws the one frame itself, then wakes the loop
+ rafOn=false;
  if(!PET)requestAnimationFrame(frame);
  const now=performance.now();
  const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy||(fan.g&&fan.cards.some(c=>c.userData.anim));
@@ -1918,7 +1967,7 @@ Object.assign(window.vinylView,{
  get inspect(){return inspect}, get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
  swapToy, get phonograph(){return phonograph},
- fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, setQuality:m=>post.setMode(m),
+ fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, applyStage, zoomWheel, setQuality:m=>post.setMode(m),
  fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, knobPoint(){const k=phonograph.getObjectByName('volume-knob');if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},
  beginInspection, returnRecord, finishInspection, flyTo, snapToDefault, defaultPose, presentPose,
@@ -1929,7 +1978,7 @@ Object.assign(window.vinylView,{
 Object.defineProperties(window.vinylView,{ // live getters (Object.assign would copy their values once)
  fan:{get(){return {on:fan.on,closing:fan.closing,scroll:fan.scroll,hover:fan.hover,count:fan.cards.length,cards:fan.cards.map(c=>({id:c.userData.fanId,shown:!!c.userData.to?.shown,moving:!!c.userData.anim,...(c.userData.to?toClient(c.userData.to.center):{})}))};}},
  fanActive:{get(){return fan.on;}},
- reframeLog:{get(){return reframeLog.slice();}},
+ stageLog:{get(){return stageLog.slice();}},stage:{get(){return {...stage,room:roomOn};}},zoomState:{get(){return {on:zoomG.on,s:zoomG.s,target:zoomG.target};}},resizeDraws:{get(){return resizeDraws;}},
  perf:{get(){const gl=renderer.getContext();return {log:perfLog.slice(),buffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],dpr:renderer.getPixelRatio(),post:post.state(),shadowRenders};}},
  keys:{get(){return {press:{...keyFx.press},glow:{...keyFx.glow},hover:keyFx.hover};}},
  knob:{get(){return {shown:knobFx.shown,level:knobLevel(),dragging:!!knobFx.drag,angle:phonograph.getObjectByName('knob-turn')?.rotation.y??null};}},

@@ -25,8 +25,8 @@ await page.waitForTimeout(2500);
 const rec=await page.evaluate(()=>({label:window.vinyl.record.label,dur:window.vinyl.buffer.duration,R:window.vinyl.record.metadata.disc_radius_mm,cover:!!window.vinyl.record.cover}));
 ok(rec.dur>1,`song decoded (${rec.dur.toFixed(1)} s, ${rec.R*2} mm record, "${rec.label}", cover ${rec.cover})`);
 // transparency + hit test: corners are empty, the middle of the machine is solid
-const hits=await page.evaluate(()=>{const W=innerWidth,H=innerHeight,h=window.petShell.hit;return {corner:h(3,3),corner2:h(W-3,H-3),mid:h(W*.5,H*.62)};});
-ok(!hits.corner&&!hits.corner2,'corners click through');ok(hits.mid,'the machine is solid under the cursor');
+const hits=await page.evaluate(()=>{const c=window.vinylView.renderer.domElement.getBoundingClientRect(),h=window.petShell.hit;return {corner:h(c.left+3,c.top+3),corner2:h(c.right-3,c.bottom-3),mid:h(c.left+c.width*.5,c.top+c.height*.62),outside:h(Math.max(2,c.left-40),Math.max(2,c.top-40))};});
+ok(!hits.corner&&!hits.corner2&&!hits.outside,'corners and the empty screen around the pet click through');ok(hits.mid,'the machine is solid under the cursor');
 // the pose is locked: no orbiting outside Inspect, sharpness capped, a small shadow map
 const lock=await page.evaluate(()=>{const v=window.vinylView;return {rotate:v.controls.enableRotate,dpr:v.renderer.getPixelRatio(),dev:devicePixelRatio,shadow:v.shadowSize};});
 ok(lock.rotate===false,'the machine cannot be turned (right-drag / Alt+drag do nothing)');

@@ -14,6 +14,9 @@ fs.writeFileSync(path.join(data,'settings.json'),JSON.stringify({volume:0,bounds
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
 const app=await _electron.launch({executablePath:exe||require(path.join(root,'node_modules','electron')),args:[...(exe?[]:[root]),...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data,DESK_PHONO_TEST:'1'}});
 const pid=app.process().pid;const page=await app.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+// The pet's window has transparent headroom round it, and the box's real pointer (the screen's middle) may sit in it,
+// hovering things between the test's synthetic clicks; park it in a corner (Linux/xvfb only, a no-op elsewhere).
+if(process.platform==='linux'){try{execFileSync('xdotool',['mousemove','0','0']);}catch{}}
 await page.waitForSelector('canvas[data-ready]',{state:'attached',timeout:90000});
 const wait=ms=>page.waitForTimeout(ms),R=(f,a)=>page.evaluate(f,a),M=(f,a)=>app.evaluate(f,a);
 const bubble=()=>R(()=>{const b=document.getElementById('bubble');return b&&!b.hidden?document.getElementById('bubbleText').textContent:'';});
@@ -150,7 +153,7 @@ await pick('tray','Play a song from this computer…');ok(await until(()=>window
 await setClip('promise');await pick('tray','Play a web link from the clipboard');ok(await until(()=>window.__links.length>0),'tray “Play a web link from the clipboard”');
 await setClip('throws');await R(()=>{window.__other=[];});await pick('tray','Play a web link from the clipboard');await wait(600);{const b=await bubble(),l=await R(()=>window.__other.slice());ok(/Copy a web link first/.test(b)&&l.length===1&&l[0]==='',`tray link with a broken clipboard: a hint, no crash (“${b}”, links ${JSON.stringify(l)})`);}
 await M(()=>{const w=global.__deskPhono.win;const b=w.getBounds();w.setBounds({...b,x:-6000,y:-6000});});
-await pick('tray','Put it back on screen');ok(await mainUntil(({screen})=>{const b=global.__deskPhono.win.getBounds(),wa=screen.getPrimaryDisplay().workArea;return b.x>=wa.x-1&&b.y>=wa.y-1&&b.x+b.width<=wa.x+wa.width+1&&b.y+b.height<=wa.y+wa.height+1;}),'tray “Put it back on screen”');
+await pick('tray','Put it back on screen');ok(await mainUntil(({screen})=>{const d=global.__deskPhono,b=d.pet,w=d.win.getBounds(),s=d.stage,wa=screen.getPrimaryDisplay().workArea;return b.x>=wa.x-1&&b.y>=wa.y-1&&b.x+b.width<=wa.x+wa.width+1&&b.y+b.height<=wa.y+wa.height+1&&w.x===s.x&&w.y===s.y;}),'tray “Put it back on screen” (the pet is on screen, its window round it)');
 // a throw inside any click shows in the pet (logged), never as Electron's modal box
 await M(()=>{setTimeout(()=>{throw new Error('test: a stray error in main');},0);});await wait(800);
 ok(/went wrong/.test(await bubble())&&await M(()=>!!global.__deskPhono.win&&!global.__deskPhono.win.isDestroyed()),'a stray error in main becomes a bubble, the app carries on');
