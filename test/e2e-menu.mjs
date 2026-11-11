@@ -17,6 +17,8 @@ const pid=app.process().pid;const page=await app.firstWindow();const errors=[];p
 await page.waitForSelector('canvas[data-ready]',{state:'attached',timeout:90000});
 const wait=ms=>page.waitForTimeout(ms),R=(f,a)=>page.evaluate(f,a),M=(f,a)=>app.evaluate(f,a);
 const bubble=()=>R(()=>{const b=document.getElementById('bubble');return b&&!b.hidden?document.getElementById('bubbleText').textContent:'';});
+// the real clipboard, read once through the new code (only its type and length are looked at)
+{const r=await M(()=>global.__deskPhono.readLink().then(v=>({type:typeof v,len:String(v).length}),e=>({err:String(e)})));ok(r.type==='string'&&!r.err,`the real clipboard reads as text without throwing (${JSON.stringify(r)})`);}
 // stand-ins: the open dialog answers with the test song; the clipboard answers like Electron 44+ (or oddly)
 await M(({dialog},f)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[f]});},song);
 const setClip=kind=>M((_,{kind,link})=>{const P=v=>Promise.resolve(v);const c={
