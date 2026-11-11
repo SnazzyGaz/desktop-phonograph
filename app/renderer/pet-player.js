@@ -1,0 +1,350 @@
+/* Desk Phonograph player. One song = one record in one sleeve, whether it came from
+   this computer or from a web link. The needle / scratch / seek / speed mechanics are
+   carried over unchanged from the Vinyl Sim player (player.js); what is new is the
+   loading: the song is decoded whole into memory (so a scratch can run anywhere in it),
+   its record is sized from its length (vinyl-core parameters()) and its grooves are
+   imitated from its own sound (the view's playback rebuild), so loud and quiet passages
+   and the run-out show. The library of sleeves lives on disk (main process). */
+(() => {
+'use strict';
+const D=window.desk,Core=window.VinylCore,Tags=window.VinylTags;
+let record=null, ctx=null, buffer=null, reverseBuffer=null, source=null, gain=null, panner=null, down=false;
+let position=0, audioAnchor=0, rpm=45, busy=false, inspecting=false, vol=.8;
+let lastGrabAngle=0, lastGrabTime=0, scratchUsingReverse=false, scratchStart=0, scratchAbsRate=0;
+const SCRATCH_SETTLE_MS=350; let lastScratchMotion=-1e9;
+const state={angle:Math.PI*.2,rotation:0,dragging:false,grabbed:false};
+function say(text,kind){window.petShell?.say(text,kind);}
+function renderStatus(){window.vinylNeedle?.wake?.();window.petShell?.playState?.();}
+function duration(){return record?.metadata.duration_sec||0;}
+function clampTime(t){return Math.max(0,Math.min(duration()-.005,t));}
+function time(){
+ if(!record)return 0;
+ if(state.grabbed)return position;
+ return Math.min(duration(),position+(down&&ctx?(ctx.currentTime-audioAnchor)*rpm/record.metadata.rpm_cut:0));
+}
+function silence(){if(source){source.onended=null;try{source.stop();}catch{}source=null;}scratchAbsRate=0;}
+function lift(){position=time();silence();down=false;state.grabbed=false;state.dragging=false;renderStatus();}
+async function ensureAudio(resume=true){if(!ctx){
+ ctx=new (window.AudioContext||window.webkitAudioContext)();gain=ctx.createGain();gain.gain.value=vol;
+ panner=ctx.createPanner();panner.panningModel='HRTF';panner.distanceModel='inverse';panner.rolloffFactor=.5;
+ panner.coneInnerAngle=360;panner.coneOuterAngle=360;
+ gain.connect(panner);panner.connect(ctx.destination);
+ }if(resume)await ctx.resume();}
+// Scene vectors are Z-up millimetres; Web Audio is Y-up metres. No tone/EQ stage.
+function setListener(position,forward,up,mouth,refDistance){
+ if(!ctx)return;
+ const scale=.001,listener=ctx.listener;
+ const setPosition=(node,v)=>{const x=v.x*scale,y=v.z*scale,z=-v.y*scale;
+  if(node.positionX){node.positionX.value=x;node.positionY.value=y;node.positionZ.value=z;}else node.setPosition(x,y,z);};
+ setPosition(listener,position);setPosition(panner,mouth);panner.refDistance=refDistance*scale;
+ if(listener.forwardX){
+  listener.forwardX.value=forward.x;listener.forwardY.value=forward.z;listener.forwardZ.value=-forward.y;
+  listener.upX.value=up.x;listener.upY.value=up.z;listener.upZ.value=-up.y;
+ }else listener.setOrientation(forward.x,forward.z,-forward.y,up.x,up.z,-up.y);
+}
+function reversed(){
+ if(!reverseBuffer&&buffer){
+  reverseBuffer=ctx.createBuffer(buffer.numberOfChannels,buffer.length,buffer.sampleRate);
+  for(let c=0;c<buffer.numberOfChannels;c++){
+   const src=buffer.getChannelData(c),dst=reverseBuffer.getChannelData(c);
+   for(let i=0,j=src.length-1;i<src.length;i++,j--)dst[i]=src[j];
+  }
+ }
+ return reverseBuffer;
+}
+async function drop(t=position){
+ if(!record||!buffer||state.grabbed||inspecting)return; await ensureAudio();if(inspecting)return;silence();
+ position=clampTime(t);
+ source=ctx.createBufferSource();source.buffer=buffer;source.playbackRate.value=rpm/record.metadata.rpm_cut;source.connect(gain);
+ audioAnchor=ctx.currentTime;down=true;source.start(0,position);
+ source.onended=()=>{if(state.grabbed)return;position=duration();down=false;source=null;renderStatus();};renderStatus();
+}
+function scratchVoice(rate){
+ if(!record||!buffer||!ctx)return;
+ if(Math.abs(rate)<0.04){silence();return;}
+ const wantRev=rate<0, abs=Math.min(8,Math.abs(rate));
+ const predicted=source?scratchStart+(scratchUsingReverse?-1:1)*scratchAbsRate*(ctx.currentTime-audioAnchor):position;
+ if(source&&scratchUsingReverse===wantRev&&Math.abs(predicted-position)<0.045){
+  scratchAbsRate=abs;source.playbackRate.value=abs;return;
+ }
+ silence();
+ scratchUsingReverse=wantRev;scratchAbsRate=abs;scratchStart=position;
+ source=ctx.createBufferSource();
+ source.buffer=wantRev?reversed():buffer;
+ source.playbackRate.value=abs;source.connect(gain);
+ const off=wantRev?Math.max(0,duration()-position):position;
+ audioAnchor=ctx.currentTime;
+ try{source.start(0,Math.min(off,Math.max(0,source.buffer.duration-.01)));}catch{source=null;return;}
+ source.onended=()=>{source=null;};
+}
+function seekToXY(x,y){
+ const m=record.metadata,r=Math.hypot(x,y);
+ if(r>m.r_start_mm+1||r<m.label_radius_mm)return false;
+ const angle=Math.atan2(y,x)-state.rotation,phi=((-angle)%(2*Math.PI)+2*Math.PI)%(2*Math.PI);
+ const k=Math.round((m.r_start_mm-r)/m.pitch_mm-phi/(2*Math.PI));
+ const t=(k+phi/(2*Math.PI)-m.lead_in_turns)*60/m.rpm_cut;
+ position=clampTime(t);state.angle=Math.atan2(y,x);return true;
+}
+function wrapAngle(d){while(d>Math.PI)d-=Math.PI*2;while(d<-Math.PI)d+=Math.PI*2;return d;}
+function grabStart(x,y){
+ if(!record||inspecting)return;
+ const r=Math.hypot(x,y),m=record.metadata;
+ if(r>m.disc_radius_mm+1)return;
+ const wasPlaying=down;position=time();silence();ensureAudio();
+
+ if(!down)seekToXY(x,y);
+ down=true;state.grabbed=true;state.dragging=true;
+ lastGrabAngle=Math.atan2(y,x);lastGrabTime=performance.now();scratchAbsRate=0;lastScratchMotion=wasPlaying?lastGrabTime:-1e9; // catching a spinning record reads as a scratch
+ renderStatus();
+}
+function grabMove(x,y){
+ if(!record||!state.grabbed)return;
+ const now=performance.now(),ang=Math.atan2(y,x);
+ const dth=wrapAngle(ang-lastGrabAngle);
+ const realDt=Math.max((now-lastGrabTime)/1000,1e-4);
+ lastGrabAngle=ang;lastGrabTime=now;
+ const dt=dth/(Math.PI*2)*60/record.metadata.rpm_cut;
+ position=clampTime(position+dt);
+ state.rotation+=dth;
+ scratchVoice(dt/realDt);
+ if(Math.abs(dth)>1e-3)lastScratchMotion=now; // any real hand movement, even too slow to sound
+ renderStatus();
+}
+function grabTick(){
+ if(!state.grabbed)return;
+ if(performance.now()-lastGrabTime>50){scratchAbsRate=0;silence();}
+}
+function grabEnd(){
+ if(!record||!state.grabbed)return;
+ state.grabbed=false;state.dragging=false;scratchAbsRate=0;
+ drop(position).catch(e=>say(e.message,'error'));
+}
+
+
+/* ---------- library ---------- */
+const library=new Map();       // id -> entry
+let currentId=null,useCounter=0,stackOffset=0,autoNext=true,saveT=0;
+const STACK=6,TEMP_CAP=10,MAX_MIN=90;
+const newId=()=>'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+function clock(t){t=Math.max(0,t);const m=Math.floor(t/60),s=Math.floor(t-m*60);return m+':'+(s<10?'0':'')+s;}
+function titleOf(e){return e.artist&&e.title?`${e.artist} — ${e.title}`:(e.title||'Record');}
+function labelOf(e){
+ if(e.state==='fetching')return e.pct>0?`Getting it ready… ${Math.round(e.pct/20)*20}%`:'Getting it ready…';
+ if(e.state==='waiting')return `Up next: ${titleOf(e)}`;
+ if(e.state==='error')return 'Couldn’t play this one';
+ if(e.missing)return `${titleOf(e)} (missing)`;
+ return titleOf(e);
+}
+function factsOf(e){return e.duration?clock(e.duration):'';}
+function ordered(){ // what comes next in a list stands at the front, then the most recently played
+ const cur=library.get(currentId),q=cur?.queue,nextOf=e=>q&&e.queue===q&&e.qIndex>cur.qIndex;
+ return [...library.values()].sort((a,b)=>{const na=nextOf(a),nb=nextOf(b);if(na!==nb)return na?-1:1;if(na)return a.qIndex-b.qIndex;return b.used-a.used||b.added-a.added;});
+}
+function sleeveOf(e){return {id:e.id,label:labelOf(e),cover:e.cover||null,art:!!e.cover,facts:factsOf(e)};}
+function sleeveList(){
+ const all=ordered().filter(e=>e.id!==currentId);
+ stackOffset=Math.max(0,Math.min(stackOffset,Math.max(0,all.length-STACK)));
+ return all.slice(stackOffset,stackOffset+STACK).map(sleeveOf);
+}
+let emitT=0;
+function emitSleeves(){clearTimeout(emitT);emitT=setTimeout(()=>{const cur=currentId&&library.get(currentId);
+ window.dispatchEvent(new CustomEvent('vinyl-sleeves',{detail:{current:currentId,count:library.size,sleeves:sleeveList(),currentSleeve:cur?sleeveOf(cur):null}}));},30);}
+function persist(){clearTimeout(saveT);saveT=setTimeout(()=>{
+ const list=[...library.values()].filter(e=>e.state!=='error'&&(e.kind==='file'||e.file||e.url)).map(e=>({id:e.id,title:e.title,artist:e.artist,kind:e.kind,path:e.kind==='file'?e.path:(e.file||null),url:e.url||null,kept:!!e.kept,duration:e.duration||0,added:e.added,used:e.used,queue:e.queue||null,qIndex:e.qIndex??null}));
+ D.saveLibrary(list);},400);}
+function flipStack(dir){const before=stackOffset;stackOffset+=dir>0?1:-1;emitSleeves();const all=library.size-(currentId?1:0);
+ if(stackOffset!==before&&all>STACK)say(`Records ${Math.max(1,Math.min(stackOffset,all-STACK)+1)}–${Math.min(all,Math.max(0,Math.min(stackOffset,all-STACK))+STACK)} of ${all}`,'hint');}
+function add(e){e.id??=newId();e.added??=Date.now();e.used??=++useCounter;library.set(e.id,e);stackOffset=0;emitSleeves();return e;}
+// Temporary records (fetched, not kept): only the newest TEMP_CAP stay; the oldest go, files and all.
+function trimTemp(){
+ const cur=library.get(currentId),protect=new Set([currentId,...queueAfter(cur,2).map(x=>x.id)]);
+ const have=[...library.values()].filter(e=>e.kind==='link'&&!e.kept&&e.file);
+ const victims=have.filter(e=>!protect.has(e.id)&&!fetching.has(e.id)).sort((a,b)=>a.used-b.used);
+ for(let i=0;i<have.length-TEMP_CAP&&i<victims.length;i++)forget(victims[i].id,true);
+}
+async function forget(id,quiet=false){
+ const e=library.get(id);if(!e)return;if(id===currentId){say('That one is on the turntable. Play something else first.');return;}
+ library.delete(id);e.buffer=null;D.forget(id,e.kind==='link'?e.file:null);emitSleeves();persist();
+ if(!quiet)say(`Put “${titleOf(e)}” away.`);
+}
+
+/* ---------- decoding ---------- */
+async function decodeEntry(e){
+ if(e.buffer)return e.buffer;
+ await ensureAudio(false);
+ const file=e.kind==='file'?e.path:e.file;
+ const r=await D.read(file);if(r.error)throw Error(r.error);
+ let buf=null;
+ try{buf=await ctx.decodeAudioData(r.bytes.slice(0));}catch{buf=null;}
+ if(!buf){const t=await D.transcode(file);if(t.error)throw Error(t.error);try{buf=await ctx.decodeAudioData(t.bytes);}catch{throw Error('That file doesn’t seem to have any sound I can play.');}}
+ if(buf.duration<.5)throw Error('That one is too short to make a record of.');
+ if(buf.duration>MAX_MIN*60)throw Error('That one is longer than an hour and a half: too long for a record, sorry.');
+ // long ones are kept in mono so a long mix doesn't fill the computer's memory
+ if(buf.duration>20*60&&buf.numberOfChannels>1){const m=ctx.createBuffer(1,buf.length,buf.sampleRate),o=m.getChannelData(0);
+  for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++)o[i]+=d[i]/buf.numberOfChannels;}buf=m;}
+ e.duration=buf.duration;e.buffer=buf;
+ if(!e.cover&&!e.tagsTried)await tagsFor(e,r.bytes);
+ return buf;
+}
+async function tagsFor(e,bytes){
+ e.tagsTried=true;
+ let t={};try{t=Tags.readTags(bytes)||{};}catch{}
+ let cover=t.picture?await Tags.normaliseCover(t.picture.bytes,t.picture.mime):null;
+ if((!t.title||!cover)&&e.kind==='file'){const p=await D.probe(e.path).catch(()=>({}));t={title:t.title||p.title,artist:t.artist||p.artist,...t};if(!cover&&p.picture)cover=await Tags.normaliseCover(await (await fetch(p.picture)).blob());}
+ if(t.title&&e.kind==='file'){e.title=t.title;e.artist=t.artist||'';}
+ if(cover){e.cover=cover;D.saveCover(e.id,cover);}
+ emitSleeves();persist();
+}
+// Cover from a picture URL (a link's thumbnail): centre-cropped square, JPEG, 600 px.
+async function squareCover(dataUrl){
+ try{const bmp=await createImageBitmap(await (await fetch(dataUrl)).blob());const s=Math.min(bmp.width,bmp.height),n=Math.min(600,s);
+  const c=document.createElement('canvas');c.width=c.height=n;c.getContext('2d').drawImage(bmp,(bmp.width-s)/2,(bmp.height-s)/2,s,s,0,0,n,n);bmp.close?.();return c.toDataURL('image/jpeg',.86);}catch{return null;}
+}
+
+/* ---------- putting a record on ---------- */
+function recordFor(e,buf){
+ const m=Core.parameters(buf.duration);
+ return {id:e.id,label:titleOf(e),cover:e.cover||null,tags:{title:e.title,artist:e.artist},metadata:m,playback_source:'playback',base:''};
+}
+function mount(e,buf){
+ inspecting=false;silence();down=false;state.grabbed=false;state.dragging=false;scratchAbsRate=0;
+ const prev=currentId?library.get(currentId):null;if(prev){prev.used=++useCounter;if(prev.id!==e.id)prev.buffer=null;} // only the record on the turntable keeps its sound in memory
+ record=recordFor(e,buf);buffer=buf;reverseBuffer=null;currentId=e.id;e.used=++useCounter;
+ position=0;state.rotation=0;rpm=record.metadata.rpm_cut;
+ window.dispatchEvent(new CustomEvent('vinyl-record',{detail:record}));
+ emitSleeves();persist();renderStatus();prefetchAfter(e);
+}
+async function play(e,{drop:dropAfter=false}={}){
+ if(busy)return false;busy=true;window.petShell?.busyState?.(true);
+ try{
+  if(e.missing&&e.kind==='file')throw Error('That song isn’t where it used to be. It may have been moved or deleted.');
+  if(e.kind==='link'&&!e.file){await fetchEntry(e);if(!e.file)return false;}
+  say(`Putting on “${titleOf(e)}”…`,'busy');
+  const buf=await decodeEntry(e);
+  lift();mount(e,buf);say(`“${titleOf(e)}”: lower the arm to play.`,'hint');
+  if(dropAfter)setTimeout(()=>{if(record&&currentId===e.id&&!down)drop(0).catch(()=>{});},1900);
+  return true;
+ }catch(err){D.log('play',err?.message);e.buffer=null;say(err?.message||'Sorry, that one wouldn’t play.','error');return false;}
+ finally{busy=false;window.petShell?.busyState?.(false);}
+}
+function swapTo(id){const e=library.get(id);if(!e||id===currentId)return false;
+ if(e.state==='fetching'){say('Still getting that one ready…','hint');return false;}
+ if(e.state==='error'){say(e.error||'That one couldn’t be played.','error');return false;}
+ if(busy)return false;
+ play(e);return true;}
+
+/* ---------- songs from this computer ---------- */
+const AUDIO=/\.(mp3|wav|wave|flac|ogg|oga|opus|m4a|aac|mp4|webm|wma|aif|aiff)$/i;
+async function openPaths(paths){
+ const list=paths.filter(Boolean);if(!list.length)return;
+ const bad=list.filter(p=>!AUDIO.test(p));const good=list.filter(p=>AUDIO.test(p));
+ if(!good.length){say('That doesn’t look like a song. Try an MP3, WAV, FLAC, OGG or M4A file.','error');return;}
+ let first=null;
+ for(const p of good){
+  const known=[...library.values()].find(e=>e.kind==='file'&&e.path===p);
+  const name=p.split(/[\\/]/).pop().replace(/\.[^.]+$/,'');
+  const e=known||add({kind:'file',path:p,title:name,artist:'',kept:true});e.used=++useCounter;e.missing=false;first??=e;
+  if(!known&&e!==first)decodeLater(e);
+ }
+ emitSleeves();persist();
+ if(bad.length)say(`Skipped ${bad.length===1?'one file that isn’t':bad.length+' files that aren’t'} a song.`,'hint');
+ await play(first);
+}
+// Tags and covers for files added but not played yet (without keeping their sound in memory).
+async function decodeLater(e){try{const r=await D.read(e.path);if(!r.error)await tagsFor(e,r.bytes);}catch{}}
+
+/* ---------- web links ---------- */
+const URLISH=/^(https?:\/\/|www\.)\S+$/i;
+function cleanLink(text){
+ const t=String(text||'').trim();const m=t.match(/https?:\/\/[^\s<>"']+/i)||(/^www\.\S+$/i.test(t)?['https://'+t]:null);
+ return m?m[0].replace(/[),.;]+$/,''):null;
+}
+let jobN=0;const progressFor=new Map();
+D.onProgress(p=>{const e=progressFor.get(p.job);if(!e)return;const step=Math.round((p.pct||0)/20);if(step!==e._step){e._step=step;e.pct=p.pct;emitSleeves();}window.petShell?.progress?.(p.pct,titleOf(e));});
+async function playLink(text){
+ const url=cleanLink(text);
+ if(!url){say('Copy a web link first (to any song or video), then choose “Play a web link”.','hint');return;}
+ const existing=[...library.values()].find(e=>e.url===url&&e.state!=='error');if(existing){await play(existing);return;}
+ const holder=add({kind:'link',url,title:'',artist:'',state:'fetching',pct:0});say('Looking at the link…','busy');
+ const info=await D.linkInfo(url);
+ if(info.error){library.delete(holder.id);emitSleeves();say(info.error,'error');return;}
+ if(info.kind==='list'){
+  library.delete(holder.id);
+  const qid=newId(),ents=info.entries;say(`A list of ${ents.length}: they’ll arrive one by one${autoNext?' and play in turn':''}.`,'hint');
+  const base=++useCounter;let first=null;
+  ents.forEach((x,i)=>{const known=[...library.values()].find(e=>e.url===x.url);if(known)return;
+   const e=add({kind:'link',url:x.url,title:x.title,artist:x.artist,duration:x.duration,thumb:x.thumb,state:'waiting',queue:qid,qIndex:i,used:base-i*1e-3});first??=e;});
+  useCounter+=1;emitSleeves();
+  if(first){await fetchEntry(first);if(first.file)await play(first,{drop:true});}
+  return;
+ }
+ Object.assign(holder,{title:info.title||'',artist:info.artist||'',duration:info.duration||0,thumb:info.thumb||null,direct:info.kind==='direct'});
+ await fetchEntry(holder);
+ if(holder.file)await play(holder,{drop:true});
+}
+const fetching=new Set();
+async function fetchEntry(e){
+ if(e.file||fetching.has(e.id))return waitFor(e);
+ fetching.add(e.id);e.state='fetching';e.pct=0;emitSleeves();
+ const job=++jobN;progressFor.set(job,e);
+ try{
+  if(e.thumb&&!e.cover){D.image(e.thumb).then(squareCover).then(c=>{if(c){e.cover=c;D.saveCover(e.id,c);emitSleeves();}});}
+  const r=await D.linkFetch(job,e.url,!!e.direct);
+  if(r.error){e.state='error';e.error=r.error;emitSleeves();say(r.error,'error');setTimeout(()=>{if(library.get(e.id)===e&&e.state==='error'&&e.id!==currentId){library.delete(e.id);emitSleeves();}},8000);return;}
+  e.file=r.file;e.state='ready';if(e.kept){const f=await D.keep(e.file,true);if(f)e.file=f;}
+  emitSleeves();persist();trimTemp();
+ }finally{fetching.delete(e.id);progressFor.delete(job);window.petShell?.progress?.(null);}
+}
+function waitFor(e){return new Promise(res=>{const t=setInterval(()=>{if(!fetching.has(e.id)){clearInterval(t);res();}},300);});}
+// Playlists: fetch only the next one or two, lazily, while this one plays.
+function queueAfter(e,n=2){
+ if(!e?.queue)return [];
+ return [...library.values()].filter(x=>x.queue===e.queue&&x.qIndex>e.qIndex).sort((a,b)=>a.qIndex-b.qIndex).slice(0,n);
+}
+async function prefetchAfter(e){for(const x of queueAfter(e,2)){if(!x.file&&x.state!=='error')await fetchEntry(x);}}
+async function keepCurrent(){
+ const e=library.get(currentId);if(!e||e.kind!=='link')return;
+ e.kept=!e.kept;if(e.file){const f=await D.keep(e.file,e.kept);if(f)e.file=f;}
+ persist();say(e.kept?'Kept. This record will stay in the stack.':'It’s a temporary record again.','hint');
+}
+/* when a record finishes: lift, and (playlist, or Auto-play) swap to the next sleeve and drop */
+let ending=false;
+function finished(){
+ if(ending)return;ending=true;setTimeout(()=>ending=false,3000);
+ lift();const e=library.get(currentId);if(!autoNext||!e)return;
+ const next=queueAfter(e,1)[0];if(!next)return;
+ say(`Next: “${titleOf(next)}”`,'hint');
+ (next.file?Promise.resolve():fetchEntry(next)).then(()=>{if(next.file&&library.has(next.id))setTimeout(()=>play(next,{drop:true}),900);});
+}
+function speed(value){const wasDown=down&&!state.grabbed;position=time();if(!state.grabbed){silence();down=false;}rpm=Math.max(10,Math.min(100,Number(value)));if(wasDown)drop(position);renderStatus();}
+function setVolume(v){vol=Math.max(0,Math.min(1,Number(v)||0));if(gain)gain.gain.value=vol;D.set({volume:vol});}
+
+window.vinyl={get record(){return record;},get state(){return state;},get down(){return down;},get buffer(){return buffer;},time,lift,drop,grabStart,grabMove,grabEnd,grabTick,setListener,
+ place(x,y,release=false){if(!record)return;if(release){grabEnd();return;}grabStart(x,y);},
+ get inspecting(){return inspecting;},setInspecting(value){if(value&&!inspecting)lift();inspecting=!!value;},
+ get volume(){return vol;},setVolume,get rpm(){return rpm;},setSpeed(v){if(!record)return;speed(v);},
+ get sources(){return {vector:false,png:false,both:false};},get source(){return record?'playback':null;},setSource(){},
+ swapTo,sleeves:sleeveList,currentSleeve:()=>{const e=currentId&&library.get(currentId);return e?sleeveOf(e):null;},get currentId(){return currentId;},
+ flipStack,forget,say,get busy(){return busy;},get libraryCount(){return library.size;},localApi:async()=>false,isShelved:async()=>true,
+ // Desk Phonograph
+ openPaths,playLink,keepCurrent,get autoNext(){return autoNext;},set autoNext(v){autoNext=!!v;},
+ get entry(){return currentId?library.get(currentId):null;},entries:()=>ordered(),
+ get playing(){return down&&!state.grabbed;}
+};
+setInterval(()=>{if(record){if(down&&!state.grabbed&&time()>=duration()-.01)finished();}},150);
+
+(async()=>{
+ const st=await D.settings();vol=Number.isFinite(st.volume)?st.volume:.8;autoNext=st.autoNext!==false;
+ const list=await D.library();
+ for(const x of list.sort((a,b)=>a.used-b.used)){
+  const e={...x,used:++useCounter,cover:x.cover||null};
+  if(e.kind==='link'){e.file=x.path||null;e.state=e.file&&!x.missing?'ready':(x.queue&&!x.kept?'waiting':'ready');if(x.missing||!e.file){e.file=null;}}
+  library.set(e.id,e);
+ }
+ // temp records whose files were cleaned away are fetched again when played; playlists past the cap are trimmed
+ trimTemp();emitSleeves();
+ D.tempSweep([...library.values()].map(e=>e.file).filter(Boolean));
+ if(!library.size)say('Drop a song on me, or right-click → Play a web link.','hint');
+ else{const last=ordered().find(e=>!e.missing&&(e.kind==='file'||e.file));if(last)play(last).then(()=>say('','hint'));}
+})();
+})();

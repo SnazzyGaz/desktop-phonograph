@@ -1,0 +1,86 @@
+{
+  "name": "desk-phonograph",
+  "version": "1.0.0",
+  "productName": "Desk Phonograph",
+  "description": "A little phonograph that sits on your desktop. Drop a song on it, or paste a link to any audio or video and it plays as a record.",
+  "private": true,
+  "license": "MIT",
+  "author": "Garyck Arntzen",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron .",
+    "fetch-tools": "node tools/fetch-tools.mjs",
+    "test": "node test/unit.mjs",
+    "test:e2e": "node test/e2e.mjs",
+    "icon": "python3 tools/make-icon.py",
+    "build:win": "node tools/fetch-tools.mjs && electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "app.deskphonograph.pet",
+    "productName": "Desk Phonograph",
+    "copyright": "Copyright \u00a9 2026 Garyck Arntzen",
+    "directories": {
+      "output": "dist",
+      "buildResources": "app/build"
+    },
+    "icon": "app/build/icon.png",
+    "files": [
+      "app/**",
+      "package.json",
+      "!app/build/*.svg"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor-bin",
+        "to": "bin",
+        "filter": [
+          "yt-dlp.exe",
+          "ffmpeg.exe",
+          "FFMPEG-LICENSE.txt",
+          "FFMPEG-VERSION.txt"
+        ]
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE.txt"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "app/build/icon.ico",
+      "signAndEditExecutable": true,
+      "artifactName": "Desk-Phonograph-${version}-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "artifactName": "Desk-Phonograph-${version}-Setup.${ext}",
+      "shortcutName": "Desk Phonograph",
+      "uninstallDisplayName": "Desk Phonograph",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

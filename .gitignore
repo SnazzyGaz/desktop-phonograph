@@ -1,0 +1,8 @@
+node_modules/
+dist/
+e2e-out/
+vendor-bin/*
+!vendor-bin/README.md
+*.log
+.DS_Store
+Thumbs.db
