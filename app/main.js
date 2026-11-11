@@ -12,9 +12,9 @@ const path=require('path'),fs=require('fs'),fsp=fs.promises,os=require('os'),cry
 const {spawn}=require('child_process');
 
 app.setAppUserModelId?.('app.deskphonograph.pet');
+if(process.env.DESK_PHONO_DATA)app.setPath('userData',process.env.DESK_PHONO_DATA); // tests: a throwaway data folder
 if(!app.requestSingleInstanceLock()){app.quit();return;}
 
-if(process.env.DESK_PHONO_DATA)app.setPath('userData',process.env.DESK_PHONO_DATA); // tests: a throwaway data folder
 const DATA=app.getPath('userData');
 const P={settings:path.join(DATA,'settings.json'),library:path.join(DATA,'library.json'),covers:path.join(DATA,'covers'),
  records:path.join(DATA,'records'),temp:path.join(app.getPath('temp'),'DeskPhonograph'),bin:path.join(DATA,'bin'),log:path.join(DATA,'log.txt')};
