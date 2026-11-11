@@ -19,10 +19,10 @@ const s2=await page.evaluate(()=>window.vinyl.entries().filter(e=>e.queue).sort(
 ok(/^FFF[^F]+$/.test(s2),`only the next two are fetched ahead (${s2}: F=fetched, w=waiting)`);
 const sl=await page.evaluate(()=>window.vinyl.sleeves().map(s=>s.label));
 ok(sl.length<=6&&sl.length>=2,`the stack shows ${sl.length} sleeves: ${sl.slice(0,3).join(' / ')}…`);
-const id1=await page.evaluate(()=>{const v=window.vinyl;v.lift();v.drop(v.buffer.duration-1.2);return v.currentId;});
+const {id1,i1}=await page.evaluate(()=>{const v=window.vinyl,i1=v.entry.qIndex;v.lift();v.drop(v.buffer.duration-1.2);return {id1:v.currentId,i1};}); // a short first one may already have handed over by itself
 await page.waitForFunction(id=>window.vinyl.currentId!==id&&window.vinyl.down,id1,{timeout:120000}).catch(()=>{});
 const s3=await page.evaluate(()=>({id:window.vinyl.currentId,i:window.vinyl.entry?.qIndex,down:window.vinyl.down,t:window.vinyl.time()}));
-ok(s3.id!==id1&&s3.i===1&&s3.down,`the next one went on and is playing (index ${s3.i}, t=${s3.t.toFixed(1)})`);
+ok(s3.id!==id1&&s3.i===i1+1&&s3.down,`the next one went on and is playing (index ${i1} → ${s3.i}, t=${s3.t.toFixed(1)})`);
 await page.waitForTimeout(5000);
 const s4=await page.evaluate(()=>window.vinyl.entries().filter(e=>e.queue).sort((a,b)=>a.qIndex-b.qIndex).map(e=>e.file?'F':e.state[0]).join(''));
 ok(/^FFFF/.test(s4),`and one more is fetched ahead (${s4})`);

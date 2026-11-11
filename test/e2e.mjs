@@ -11,7 +11,9 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let electronPath;try{electronPath=require(path.join(root,'node_modules','electron'));}catch{}
 const exe=process.env.DESK_EXE; // test a built app instead of the source
 const app=await _electron.launch({executablePath:exe||electronPath,args:[...(exe?[]:[root]),...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});
-const errors=[];const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1;};
+const errors=[];
+async function still(o){await page.evaluate(()=>{window.__keep=setInterval(()=>window.vinylView.invalidate(3),100);});try{await page.screenshot({timeout:120000,...o});}finally{await page.evaluate(()=>clearInterval(window.__keep));}}
+const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1;};
 const page=await app.firstWindow();
 page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('pageerror',e=>errors.push(String(e)));
 try{await page.waitForSelector('canvas[data-ready]',{timeout:60000,state:'attached'});}catch(e){console.log('never drew; errors:',errors.join('\n'));const l=path.join(data,'log.txt');if(fs.existsSync(l))console.log(fs.readFileSync(l,'utf8'));await app.close();process.exit(1);}
@@ -27,7 +29,7 @@ const hits=await page.evaluate(()=>{const W=innerWidth,H=innerHeight,h=window.pe
 ok(!hits.corner&&!hits.corner2,'corners click through');ok(hits.mid,'the machine is solid under the cursor');
 await page.evaluate(()=>window.vinyl.drop(0));await page.waitForTimeout(1500);
 const t1=await page.evaluate(()=>window.vinyl.time());ok(t1>.8,`playing (t=${t1.toFixed(2)})`);
-await page.evaluate(()=>{window.__keep=setInterval(()=>window.vinylView.invalidate(3),100);});await page.screenshot({path:path.join(out,'pet-playing.png'),omitBackground:true});
+await still({path:path.join(out,'pet-playing.png'),omitBackground:true});
 // scratch: grab the record and turn it back by a quarter turn, then forward
 const sc=await page.evaluate(async()=>{const v=window.vinyl,r=v.record.metadata.disc_radius_mm*.7;const a0=Math.atan2(1,1);v.grabStart(r*Math.cos(a0),r*Math.sin(a0));const t0=v.time();
  for(let i=1;i<=20;i++){const a=a0-i*.08;v.grabMove(r*Math.cos(a),r*Math.sin(a));await new Promise(r=>setTimeout(r,16));}const back=v.time();
@@ -43,7 +45,7 @@ ok(playFrames<=70,`playing draws ≤ ~30 fps (${playFrames/2} fps)`);ok(idleFram
 // inspect, then put it back
 await page.evaluate(()=>window.vinylView.beginInspection());await page.waitForFunction(()=>window.vinylView.inspect.phase==='held',null,{timeout:30000}).catch(()=>{});await page.waitForTimeout(800);
 ok(await page.evaluate(()=>window.vinylView.inspect.phase==='held'),'inspect lifts the record');
-await page.evaluate(()=>{window.__keep=setInterval(()=>window.vinylView.invalidate(3),100);});await page.screenshot({path:path.join(out,'pet-inspect.png'),omitBackground:true,timeout:120000});
+await still({path:path.join(out,'pet-inspect.png'),omitBackground:true,timeout:120000});
 await page.keyboard.press('Escape');await page.waitForFunction(()=>!window.vinylView.inspect.active,null,{timeout:30000}).catch(()=>{});
 ok(await page.evaluate(()=>!window.vinylView.inspect.active),'Esc puts it back');
 // library persists
@@ -54,7 +56,7 @@ if(link){
  await page.waitForFunction(l=>window.vinyl.entry?.url===l&&window.vinyl.buffer,link,{timeout:240000}).catch(()=>{});
  const e=await page.evaluate(()=>({url:window.vinyl.entry?.url,title:window.vinyl.entry?.title,dur:window.vinyl.buffer?.duration,file:window.vinyl.entry?.file}));
  ok(e.url===link&&e.dur>1,`web link plays (${e.title}, ${e.dur?.toFixed(1)} s, ${((Date.now()-t0)/1000).toFixed(0)} s to fetch)`);
- await page.waitForTimeout(2500);await page.evaluate(()=>{window.__keep=setInterval(()=>window.vinylView.invalidate(3),100);});await page.screenshot({path:path.join(out,'pet-link.png'),omitBackground:true});
+ await page.waitForTimeout(2500);await still({path:path.join(out,'pet-link.png'),omitBackground:true});
 }
 ok(!errors.length,'no page errors'+(errors.length?': '+errors.slice(0,5).join(' | '):''));
 const log=path.join(data,'log.txt');if(fs.existsSync(log))console.log('--- app log\n'+fs.readFileSync(log,'utf8').slice(-2000));
