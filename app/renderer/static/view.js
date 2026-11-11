@@ -586,7 +586,7 @@ const TRANSPORT=['prev','toggle','next'];
 /* The pet's front panel, in R from the cabinet's front face (x across, z up from the body's foot):
    a wide Now Playing card across the top, the three keys in a row under it, the volume knob at
    the left end of that row (the dancer's pip keeps the lower right corner). */
-const PANEL={cardZ:.515,keyZ:.232,keyR:.09,keyX:[-.16,.1,.36],knobX:-.73,knobR:.088};
+const PANEL={cardZ:.585,keyZ:.195,keyR:.145,keyX:[-.3,.07,.44],knobX:-.86,knobR:.15};
 const keyFx={press:{prev:1,toggle:1,next:1},glow:{prev:0,toggle:0,next:0},hover:null};
 function keyGlyph(kind){
  if(typeof document.createElement!=='function')return null;
@@ -609,7 +609,7 @@ function buildTransport(R,W,D,bodyBot,H,brass,bakelite){
  const faceY=-D+R*.02,z=bodyBot+R*PANEL.keyZ,r=R*PANEL.keyR;
  TRANSPORT.forEach((id,i)=>{
   const k=new THREE.Group();k.name='transport-'+id;k.userData={pick:'transport',key:id};k.position.set(R*PANEL.keyX[i],faceY,z);
-  const bezel=new THREE.Mesh(new THREE.TorusGeometry(r*1.12,R*.008,12,40),brass);bezel.rotation.x=Math.PI/2;k.add(bezel);
+  const bezel=new THREE.Mesh(new THREE.TorusGeometry(r*1.12,R*.012,12,40),brass);bezel.rotation.x=Math.PI/2;k.add(bezel);
   const press=new THREE.Group();press.name='press';k.add(press);
   const mat=bakelite.clone();mat.emissive=new THREE.Color(0xff9a3c);mat.emissiveIntensity=0;
   const cap=new THREE.Mesh(new THREE.CylinderGeometry(r,r*1.03,R*.032,40),mat);cap.position.y=-R*.012;press.add(cap);
@@ -618,7 +618,7 @@ function buildTransport(R,W,D,bodyBot,H,brass,bakelite){
   if(tex){const gm=new THREE.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false,metalness:.75,roughness:.32,color:0xffffff,emissive:new THREE.Color(0xffc070),emissiveMap:tex,emissiveIntensity:0,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3});
    const gl=new THREE.Mesh(new THREE.PlaneGeometry(r*1.9,r*1.9),gm);gl.name='glyph';gl.rotation.x=Math.PI/2;gl.position.y=-R*.03-.15;press.add(gl);}
   const hitM=new THREE.MeshBasicMaterial({visible:false});hitM.userData.shared=true;
-  const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.3,12,8),hitM);hit.name='transport-hit';k.add(hit);
+  const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.18,12,8),hitM);hit.name='transport-hit';k.add(hit);
   k.userData.mats=[mat,press.getObjectByName('glyph')?.material].filter(Boolean);k.userData.press=press;
   g.add(k);
  });
@@ -634,7 +634,7 @@ function knobDial(){
  if(typeof document.createElement!=='function')return null;
  const s=512,c=document.createElement('canvas');c.width=c.height=s;const g=c.getContext('2d');if(!g)return null;
  g.translate(s/2,s/2);g.strokeStyle='#ecd08a';g.fillStyle='#ecd08a';g.lineCap='round';
- for(let i=0;i<=20;i++){const a=-KNOB_SWEEP/2+KNOB_SWEEP*i/20-Math.PI/2,big=i%2===0,r0=s*(big?.37:.395),r1=s*.45;
+ for(let i=0;i<=20;i++){const a=-KNOB_SWEEP/2+KNOB_SWEEP*i/20-Math.PI/2,big=i%2===0,r0=s*(big?.39:.41),r1=s*.45;
   g.lineWidth=s*(big?.02:.012);g.beginPath();g.moveTo(Math.cos(a)*r0,Math.sin(a)*r0);g.lineTo(Math.cos(a)*r1,Math.sin(a)*r1);g.stroke();}
  g.lineWidth=s*.008;g.beginPath();g.arc(0,0,s*.45,-KNOB_SWEEP/2-Math.PI/2,KNOB_SWEEP/2-Math.PI/2);g.stroke();
  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t;
@@ -643,17 +643,17 @@ function buildVolumeKnob(R,W,D,bodyBot,brass,bakelite){
  const g=new THREE.Group();g.name='volume-knob';g.userData.pick='knob';
  const faceY=-D+R*.02,r=R*PANEL.knobR;g.position.set(R*PANEL.knobX,faceY,bodyBot+R*PANEL.keyZ);
  const tex=knobDial();
- if(tex){const dial=new THREE.Mesh(new THREE.PlaneGeometry(r*3.2,r*3.2),new THREE.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false,metalness:.7,roughness:.35,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+ if(tex){const dial=new THREE.Mesh(new THREE.PlaneGeometry(r*2.8,r*2.8),new THREE.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false,metalness:.7,roughness:.35,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
   dial.name='knob-dial';dial.rotation.x=Math.PI/2;dial.position.y=-.1;g.add(dial);}
  const turn=new THREE.Group();turn.name='knob-turn';g.add(turn);
- const skirt=new THREE.Mesh(new THREE.CylinderGeometry(r*1.04,r*1.1,R*.014,64),brass);skirt.position.y=-R*.007;turn.add(skirt);
+ const skirt=new THREE.Mesh(new THREE.CylinderGeometry(r*1.0,r*1.05,R*.018,64),brass);skirt.position.y=-R*.009;turn.add(skirt);
  const knurl=brass.clone();knurl.flatShading=true;
  const body=new THREE.Mesh(new THREE.CylinderGeometry(r*.86,r*.92,R*.052,36,1),knurl);body.position.y=-R*.04;turn.add(body); // flat facets read as knurling
  const cap=new THREE.Mesh(new THREE.CylinderGeometry(r*.74,r*.84,R*.014,64),bakelite);cap.position.y=-R*.072;turn.add(cap);
  const ptr=new THREE.Mesh(new THREE.BoxGeometry(r*.1,R*.006,r*.62),new THREE.MeshStandardMaterial({color:0xe9cf8e,metalness:.85,roughness:.28,emissive:new THREE.Color(0x553a10),emissiveIntensity:.25}));
  ptr.name='knob-pointer';ptr.position.set(0,-R*.08,r*.38);turn.add(ptr);
  const hitM=new THREE.MeshBasicMaterial({visible:false});hitM.userData.shared=true;
- const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.35,12,8),hitM);hit.name='knob-hit';g.add(hit);
+ const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.2,12,8),hitM);hit.name='knob-hit';g.add(hit);
  return g;
 }
 function knobLevel(){const p=window.vinyl;return p?(p.muted?0:Math.max(0,Math.min(1,p.volume??.8))):.8;}
@@ -687,7 +687,7 @@ function updateKeys(dt){
  for(const k of t.children){const id=k.userData.key;if(!id)continue;
   if(keyFx.press[id]<1){keyFx.press[id]=Math.min(1,keyFx.press[id]+dt/.18);busy=true;}
   const want=keyFx.hover===id?1:0,gl=keyFx.glow[id];if(Math.abs(want-gl)>.005){keyFx.glow[id]=gl+(want-gl)*Math.min(1,dt*14);busy=true;}else keyFx.glow[id]=want;
-  k.userData.press.position.y=R*.018*Math.sin(Math.PI*keyFx.press[id]);
+  k.userData.press.position.y=R*PANEL.keyR*.2*Math.sin(Math.PI*keyFx.press[id]);
   const [cap,glyph]=k.userData.mats;if(cap)cap.emissiveIntensity=.1*keyFx.glow[id];if(glyph)glyph.emissiveIntensity=.18+.3*keyFx.glow[id]; // the glyphs always a little lit, so they read small
  }
  return busy;
@@ -697,7 +697,7 @@ function updateKeys(dt){
    old filing drawer) that says what is on the turntable. The card is a canvas texture: paper
    with grain and age, ink that spreads a little, the frame's shadow along its top edge. */
 const NOW={tex:null,canvas:null,key:null};
-const CARD_W=1.8,CARD_H=.21; // in R: a wide card across the front panel
+const CARD_W=2.0,CARD_H=.27; // in R: the card fills the top of the front panel, leg to leg
 function seeded(n){let s=n|0||1;return ()=>((s=Math.imul(s^s>>>15,2246822507)^Math.imul(s^s>>>13,3266489909))>>>0)/4294967296;}
 function fitText(g,text,maxW,size,min,weight,family,style=''){
  let px=size;const font=p=>`${style} ${weight} ${p}px ${family}`.trim();
@@ -730,15 +730,15 @@ function drawNowPlaying(np){
  const b=g.createLinearGradient(0,H,0,H*.9);b.addColorStop(0,'rgba(40,24,8,.18)');b.addColorStop(1,'rgba(40,24,8,0)');g.fillStyle=b;g.fillRect(0,H*.9,W,H*.1);
  g.textAlign='center';g.textBaseline='middle';
  // NOW PLAYING, small spaced capitals between fine rules
- g.font=`700 ${Math.round(H*.12)}px ${serif}`;if('letterSpacing' in g)g.letterSpacing=`${Math.round(H*.045)}px`;
- const head='NOW PLAYING',hw=g.measureText(head).width;inkText(g,head,W/2,H*.19,'#6a4320');if('letterSpacing' in g)g.letterSpacing='0px';
+ g.font=`700 ${Math.round(H*.095)}px ${serif}`;if('letterSpacing' in g)g.letterSpacing=`${Math.round(H*.04)}px`;
+ const head='NOW PLAYING',hw=g.measureText(head).width;inkText(g,head,W/2,H*.11,'#6a4320');if('letterSpacing' in g)g.letterSpacing='0px';
  g.strokeStyle='rgba(106,67,32,.7)';g.fillStyle='rgba(106,67,32,.7)';g.lineWidth=3;
- for(const s of [-1,1]){const x0=W/2+s*(hw/2+28),x1=x0+s*W*.16;g.beginPath();g.moveTo(x0,H*.19);g.lineTo(x1,H*.19);g.stroke();g.beginPath();g.arc(x1+s*8,H*.19,5,0,Math.PI*2);g.fill();}
- if(!np){g.font=`italic 400 ${Math.round(H*.26)}px ${serif}`;inkText(g,'— no record —',W/2,H*.58,'#7a5a3a');}
+ for(const s of [-1,1]){const x0=W/2+s*(hw/2+28),x1=x0+s*W*.16;g.beginPath();g.moveTo(x0,H*.11);g.lineTo(x1,H*.11);g.stroke();g.beginPath();g.arc(x1+s*8,H*.11,5,0,Math.PI*2);g.fill();}
+ if(!np){g.font=`italic 400 ${Math.round(H*.34)}px ${serif}`;inkText(g,'— no record —',W/2,H*.57,'#7a5a3a');}
  else{ // as big as the card allows: the title is what you read from across the desk
-  const title=fitText(g,String(np.title||'Record'),W*.92,Math.round(H*.4),Math.round(H*.22),700,serif);
-  inkText(g,title,W/2,np.artist?H*.52:H*.6,'#2a170a');
-  if(np.artist){const a=fitText(g,String(np.artist),W*.84,Math.round(H*.22),Math.round(H*.14),400,serif,'italic');inkText(g,a,W/2,H*.83,'#4a3018');}
+  const title=fitText(g,String(np.title||'Record'),W*.94,Math.round(H*.56),Math.round(H*.3),700,serif);
+  inkText(g,title,W/2,np.artist?H*.49:H*.57,'#2a170a');
+  if(np.artist){const a=fitText(g,String(np.artist),W*.86,Math.round(H*.17),Math.round(H*.12),400,serif,'italic');inkText(g,a,W/2,H*.87,'#4a3018');}
  }
  if(!NOW.tex){NOW.tex=new THREE.CanvasTexture(c);NOW.tex.colorSpace=THREE.SRGBColorSpace;NOW.tex.userData.shared=true;}
  NOW.tex.anisotropy=renderer.capabilities?.getMaxAnisotropy?.()||1;NOW.tex.needsUpdate=true;invalidate(2);
@@ -762,7 +762,6 @@ function buildDrawer(R,W,D,bodyBot,brass,wood){
   m.name=name;m.rotation.x=Math.PI/2;m.position.set(0,face-R*.008+dy,cz);g.add(m);return m;};
  const fw=R*(CARD_W+.05),fh=R*(CARD_H+.045);
  frameAt(fw,fh,R*CARD_W*.997,R*CARD_H*.985,R*.01,0,'now-playing-frame');
- frameAt(fw+R*.03,fh+R*.03,fw-R*.004,fh-R*.004,R*.005,R*.004,'now-playing-frame-outer'); // a fine outer step
  for(const sx of [-1,1])for(const sz of [-1,1]){ // stepped deco corners with screw heads
   const c=new THREE.Mesh(new THREE.BoxGeometry(R*.045,R*.012,R*.045),brass);c.rotation.y=Math.PI/4;c.position.set(sx*(fw/2+R*.008),face-R*.016,cz+sz*(fh/2+R*.008));g.add(c);
   const s=new THREE.Mesh(new THREE.SphereGeometry(R*.008,12,6,0,Math.PI*2,0,Math.PI/2),brass);s.rotation.x=Math.PI;s.position.set(sx*(fw/2+R*.008),face-R*.024,cz+sz*(fh/2+R*.008));g.add(s);}
@@ -1440,7 +1439,7 @@ function buildPhonograph(R){
  const lidBead=slab(2*W+R*.02,2*D+R*.02,R*.025,R*.011,dark,4);lidBead.position.z=top-lid-R*.025;phonograph.add(lidBead);
  const bodyTop=top-lid-R*.025,bodyBot=bodyTop-H;
  const body=slab(2*W-R*.08,2*D-R*.08,H,R*.01,mahogany);body.position.z=bodyBot;phonograph.add(body);
- const pf=slab(2*W-R*.5,R*.04,H-R*.22,R*.014,panel,4);pf.position.set(0,-D+R*.04,bodyBot+R*.11);phonograph.add(pf);
+ const pf=PET?slab(2*W-R*.3,R*.04,H-R*.06,R*.014,panel,4):slab(2*W-R*.5,R*.04,H-R*.22,R*.014,panel,4);pf.position.set(0,-D+R*.04,bodyBot+R*(PET?.03:.11));phonograph.add(pf); // the pet: its controls use the whole face
  for(const sx of [-1,1]){const ps=slab(R*.04,2*D-R*.5,H-R*.22,R*.014,panel,4);ps.position.set(sx*(W-R*.04),0,bodyBot+R*.11);phonograph.add(ps);}
  const pb=pf.clone();pb.position.y=D-R*.04;phonograph.add(pb);
  for(const sx of [-1,1])for(const sy of [-1,1]){const c=turnedColumn(H,R*.075,dark);c.position.set(sx*(W-R*.045),sy*(D-R*.045),bodyBot);phonograph.add(c);}
