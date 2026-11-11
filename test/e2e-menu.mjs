@@ -24,9 +24,9 @@ const setClip=kind=>M((_,{kind,link})=>{const P=v=>Promise.resolve(v);const c={
 const spyLinks=()=>R(()=>{window.__links=[];window.vinyl.playLink=t=>{window.__links.push(t);return Promise.resolve();};});
 if(!LINK)await spyLinks();
 async function openPopup(at){
- const c=at||await R(()=>window.vinylView.toClient(0,0,0));
+ const c=at||await R(()=>window.vinylView.toClient(0,0,0));const n=await M(()=>global.__deskPhono.popups);
  await page.mouse.click(c.x,c.y,{button:'right'});
- for(let i=0;i<40;i++){if(await M(()=>!!global.__deskPhono.popup))return true;await wait(100);}
+ for(let i=0;i<40;i++){if(await M(()=>global.__deskPhono.popups)>n)return true;await wait(100);}
  return false;
 }
 const labelsOf=menu=>M((_,which)=>{const m=global.__deskPhono[which];const walk=(items,pre)=>items.flatMap(i=>i.type==='separator'?[]:[...(i.visible===false?[]:[pre+i.label]),...(i.submenu?walk(i.submenu.items,pre+i.label+'>'):[])]);return m?walk(m.items,''):[];},menu);

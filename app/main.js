@@ -37,7 +37,7 @@ function guard(items){
   if(typeof it.click==='function'){const f=it.click,label=it.label||'item';o.click=(...a)=>{log('menu',label);try{const r=f(...a);if(r&&typeof r.catch==='function')r.catch(e=>oops('menu '+label,e));}catch(e){oops('menu '+label,e);}};}
   return o;});
 }
-let clip=clipboard,popupMenu=null,trayMenu=null; // menus kept referenced while they are up
+let clip=clipboard,popupMenu=null,trayMenu=null,popups=0; // menus kept referenced while they are up
 
 /* ---------- settings ---------- */
 const DEFAULTS={bounds:null,onTop:true,pip:false,autoNext:true,volume:.8,toy:'hula',ytdlpChecked:0};
@@ -181,7 +181,7 @@ ipcMain.handle('pet:menu',(e,st)=>{
   {type:'separator'},
   {label:'Hide (click the tray icon to bring it back)',click:toggleShown},
   {label:'Quit',click:quit}];
- const m=Menu.buildFromTemplate(guard(tmpl));popupMenu=m;
+ const m=Menu.buildFromTemplate(guard(tmpl));popupMenu=m;popups++;
  m.popup({window:win,callback:()=>{setTimeout(()=>{if(popupMenu===m)popupMenu=null;},1500);}});
  return true;
 });
@@ -363,7 +363,7 @@ ipcMain.on('pet:log',(e,...a)=>log('page',...a.map(String)));
 
 /* ---------- life cycle ---------- */
 // Tests only (never set in normal use): reach the menus as built, and stand in a fake clipboard.
-if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;}};
+if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;}};
 app.on('second-instance',()=>{if(win){if(!win.isVisible())toggleShown();}});
 app.whenReady().then(()=>{
  Menu.setApplicationMenu(null);
