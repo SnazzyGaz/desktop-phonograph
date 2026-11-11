@@ -33,7 +33,7 @@ let R=90,drag=false,version=0,builds=0;
 
 /* ---------- draw-on-demand bookkeeping ---------- */
 let dirty=3;
-function invalidate(frames=2){dirty=Math.max(dirty,frames);if(PET)wakeLoop?.();}
+function invalidate(frames=2){dirty=Math.max(dirty,frames);if(PET){wakeLoop?.();if(window.__invTrace)window.__invTrace.push(String(new Error().stack).split('\n').slice(2,4).join(' < '));}}
 let wakeLoop=null;
 const post=createPost(renderer,scene,camera,{onChange:s=>{syncQualityUI(s);invalidate(3);}});
 
