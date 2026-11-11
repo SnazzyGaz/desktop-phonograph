@@ -40,9 +40,9 @@ function guard(items){
 let clip=clipboard,popupMenu=null,trayMenu=null,popups=0; // menus kept referenced while they are up
 
 /* ---------- settings ---------- */
-const DEFAULTS={bounds:null,onTop:true,pip:false,autoNext:true,volume:.8,toy:'hula',ytdlpChecked:0};
+const DEFAULTS={bounds:null,onTop:true,autoNext:true,volume:.8,toy:'hula',ytdlpChecked:0};
 let settings={...DEFAULTS};
-try{settings={...DEFAULTS,...JSON.parse(fs.readFileSync(P.settings,'utf8'))};delete settings.pose;}catch{} // 1.0.0 kept a turned pose; the pose is fixed now
+try{settings={...DEFAULTS,...JSON.parse(fs.readFileSync(P.settings,'utf8'))};delete settings.pose;delete settings.pip;}catch{} // old settings: a turned pose (1.0.0), the needle close-up (to 1.0.2)
 let saveT=null;
 function saveSettings(){clearTimeout(saveT);saveT=setTimeout(()=>{try{fs.writeFileSync(P.settings,JSON.stringify(settings,null,1));}catch(e){log('settings',e.message);}},300);}
 
@@ -175,7 +175,6 @@ ipcMain.handle('pet:menu',(e,st)=>{
   {label:'Keep this record',type:'checkbox',visible:!!st.canKeep,checked:!!st.kept,click:()=>send('pet:command',{cmd:'keep'})},
   {label:'Put this record away',visible:!!st.sleeve,click:()=>send('pet:command',{cmd:'forget',id:st.sleeve})},
   {label:'Play the next one automatically',type:'checkbox',checked:settings.autoNext,click:m=>{settings.autoNext=m.checked;saveSettings();send('pet:command',{cmd:'autoNext',on:m.checked});}},
-  {label:'Needle close-up',type:'checkbox',checked:settings.pip,click:m=>{settings.pip=m.checked;saveSettings();send('pet:command',{cmd:'pip',on:m.checked});}},
   {label:'Swap the dancer',click:()=>send('pet:command',{cmd:'toy'})},
   {label:'Always on top',type:'checkbox',checked:settings.onTop,click:m=>{settings.onTop=m.checked;saveSettings();win.setAlwaysOnTop(m.checked,'floating');send('pet:command',{cmd:'say',kind:'hint',text:m.checked?'Stays on top of other windows':'Other windows can cover it now'});}},
   {type:'separator'},
@@ -186,7 +185,7 @@ ipcMain.handle('pet:menu',(e,st)=>{
  return true;
 });
 ipcMain.handle('pet:settings',()=>({...settings}));
-ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','toy','pip','autoNext'])if(k in patch)settings[k]=patch[k];saveSettings();}});
+ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','toy','autoNext'])if(k in patch)settings[k]=patch[k];saveSettings();}});
 ipcMain.handle('pet:clipboard',async()=>{try{return String(await readClipboardLink(clip)||'').trim();}catch(e){log('clipboard',e&&e.message);return '';}});
 
 /* ---------- library on disk ---------- */

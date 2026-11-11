@@ -107,14 +107,11 @@ D.onCommand(async c=>{
   case 'keep':p.keepCurrent();break;
   case 'forget':p.forget(c.id);break;
   case 'autoNext':p.autoNext=c.on;say(c.on?'The next one will play by itself':'It will stop after each record','hint');break;
-  case 'pip':setPip(c.on);break;
   case 'toy':v.swapToy();break;
   case 'say':say(String(c.text||''),c.kind||'info');break;
  }}catch(e){D.log('command',c&&c.cmd,e&&e.stack||String(e));say('That didn’t work just then. Give it another go.','error');}
 });
 
-/* ---------- needle close-up (corner overlay) ---------- */
-function setPip(on){const b=$('needleView');if(b&&window.vinylNeedle&&window.vinylNeedle.on!==!!on)b.click();}
 
 /* ---------- songs and links dropped or pasted on it ---------- */
 document.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';document.body.classList.add('dropping');});
@@ -135,10 +132,7 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ---------- start-up ---------- */
-D.settings().then(st=>{
- try{localStorage.setItem('vinyl-needle-view',st.pip?'on':'off');}catch{}
- const s=document.createElement('script');s.src='static/needle-pip.js';document.body.appendChild(s);
-});
+try{localStorage.removeItem('vinyl-needle-view');}catch{} // the old needle close-up's switch
 const busyState=b=>document.body.classList.toggle('busy',!!b);
 window.petShell={say,progress,wheel,beginMove,drew,busyState,playState(){},hit:solidAt,get solid(){return solid;},
  get busy(){return !!mv;}};

@@ -35,7 +35,7 @@ function plan(m,maxTex=8192){
  return {T,A,width:A,height:2*T,bytes:A*2*T*8};
 }
 // Playback samples (any rate) -> lateral displacement (units of amp_mm) at the cut's rate: as
-// needle-pip.js displacement(), the presence shelf put back.
+// the old needle close-up's displacement(), the presence shelf put back.
 function displacement(samples,fsIn,m){
  const fs=m.sample_rate||16000;let x;
  if(Math.abs(fsIn-fs)<1e-6)x=Float32Array.from(samples);
@@ -55,7 +55,7 @@ function vectorCentre(m,x){
  return tau=>{const idx=(tau-lead)*60/rpm*fs;if(!(idx>=0&&idx<=last))return 0;const j=Math.floor(idx);return amp*(j===last?x[last]:x[j]+(x[j+1]-x[j])*(idx-j));};
 }
 // c(turns) from the height map's pixels: the depth-weighted centroid across the groove (bilinear,
-// 2 samples a pixel over the groove's whole reach), as needle-pip.js pngSurface().lateral
+// 2 samples a pixel over the groove's whole reach), as the old needle close-up's pngSurface().lateral
 function pngCentre(m,map){
  const n=map.size,st=map.samples,R=m.disc_radius_mm,k=(n-1)/(2*R),hi=n-1,inv=(m.height_polarity??'standard')==='inverted';
  const hs=m.height_scale_mm,thick=m.thickness_mm,hw=m.groove_width_mm/2,span=m.amp_mm+hw,px=2*R/(n-1),N=Math.max(9,2*Math.ceil(span/px*2)+1);

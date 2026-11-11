@@ -12,6 +12,4 @@ body.dropping #view{filter:drop-shadow(0 0 10px rgba(255,214,130,.9))}
 #bubble[hidden]{display:none}
 #bubble i{display:block;height:4px;margin-top:6px;border-radius:2px;background:linear-gradient(90deg,#b8954e var(--p,0%),rgba(43,29,18,.15) var(--p,0%))}
 #bubble i[hidden]{display:none}
-/* the needle close-up: a small corner overlay, scaled to the window */
-.needle-pip{top:6px;right:6px;width:34vw;height:21.4vw;min-width:120px;min-height:76px;padding:2px}
 .needle-card{display:none!important}

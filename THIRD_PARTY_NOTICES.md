@@ -31,5 +31,5 @@ Desk Phonograph runs it as a separate program and does not link to it.
 Jost and Manrope, SIL Open Font License 1.1 (`app/renderer/static/fonts/*-OFL.txt`).
 
 ## Vinyl Sim
-The 3D phonograph, the record and groove rendering, the needle close-up and the
+The 3D phonograph, the record and groove rendering, and the
 player mechanics come from Vinyl Sim by Garyck Arntzen.

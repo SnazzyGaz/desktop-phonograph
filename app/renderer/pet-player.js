@@ -14,7 +14,7 @@ let lastGrabAngle=0, lastGrabTime=0, scratchUsingReverse=false, scratchStart=0, 
 const SCRATCH_SETTLE_MS=350; let lastScratchMotion=-1e9;
 const state={angle:Math.PI*.2,rotation:0,dragging:false,grabbed:false};
 function say(text,kind){window.petShell?.say(text,kind);}
-function renderStatus(){window.vinylNeedle?.wake?.();window.petShell?.playState?.();}
+function renderStatus(){window.petShell?.playState?.();}
 function duration(){return record?.metadata.duration_sec||0;}
 function clampTime(t){return Math.max(0,Math.min(duration()-.005,t));}
 function time(){

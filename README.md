@@ -23,7 +23,7 @@ record.
 |---|---|
 | Drag the cabinet | moves it anywhere, onto any screen (give it a throw and it slides) |
 | Scroll | makes it bigger or smaller |
-| Right-click | the menu: speed, volume, needle close-up, always on top, quit |
+| Right-click | the menu: play/pause, next, previous, shuffle, repeat, volume, speed, always on top, quit |
 | Double-click the record | look at it closely: drag to turn it, right-drag to look round, scroll to zoom; Esc or click to put it back |
 | Space · ↑ ↓ · [ ] | needle up/down · volume · speed |
 
