@@ -94,7 +94,7 @@ await pick('tray','Show the phonograph');await mainUntil(()=>global.__deskPhono.
 await R(()=>{window.__paths=[];const o=window.vinyl.openPaths;window.vinyl.openPaths=p=>{window.__paths.push(...p);return o(p);};});
 await pick('tray','Play a song from this computer…');ok(await until(()=>window.__paths.length>0),'tray “Play a song from this computer…”');
 await setClip('promise');await pick('tray','Play a web link from the clipboard');ok(await until(()=>window.__links.length>0),'tray “Play a web link from the clipboard”');
-await setClip('throws');await pick('tray','Play a web link from the clipboard');await wait(600);ok(/Copy a web link first/.test(await bubble()),'tray link with a broken clipboard: a hint, no crash');
+await setClip('throws');await pick('tray','Play a web link from the clipboard');await wait(600);{const b=await bubble(),l=await R(()=>window.__links.slice());ok(/Copy a web link first/.test(b),`tray link with a broken clipboard: a hint, no crash (“${b}”, links ${JSON.stringify(l)})`);}
 await M(()=>{const w=global.__deskPhono.win;const b=w.getBounds();w.setBounds({...b,x:-6000,y:-6000});});
 await pick('tray','Put it back on screen');ok(await mainUntil(({screen})=>{const b=global.__deskPhono.win.getBounds(),wa=screen.getPrimaryDisplay().workArea;return b.x>=wa.x-1&&b.y>=wa.y-1&&b.x+b.width<=wa.x+wa.width+1&&b.y+b.height<=wa.y+wa.height+1;}),'tray “Put it back on screen”');
 // a throw inside any click shows in the pet (logged), never as Electron's modal box
@@ -106,6 +106,6 @@ ok(!bad.length,'no other errors in the log'+(bad.length?': '+bad.slice(0,3).join
 ok((logTxt.match(/ menu /g)||[]).length>=30,`every click is logged (${(logTxt.match(/ menu /g)||[]).length})`);
 ok(!errors.length,'no page errors'+(errors.length?': '+errors.join(' | '):''));
 const closed=new Promise(r=>app.once('close',()=>r(true)));
-await popupItem('Quit');ok(await Promise.race([closed,new Promise(r=>setTimeout(()=>r(false),10000))]),'“Quit” quits');
+ok(await openPopup(),'menu opens for “Quit”');await pick('popup','Quit').catch(()=>{});ok(await Promise.race([closed,new Promise(r=>setTimeout(()=>r(false),10000))]),'“Quit” quits');
 await new Promise(r=>setTimeout(r,1500));try{fs.rmSync(data,{recursive:true,force:true});}catch{}
 console.log(fails?`${fails} FAILED`:'all passed');process.exit(fails?1:0);
