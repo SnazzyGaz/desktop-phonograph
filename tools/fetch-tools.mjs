@@ -3,8 +3,8 @@
 //   npm run fetch-tools
 //  - yt-dlp.exe: latest release from https://github.com/yt-dlp/yt-dlp (SHA2-256SUMS)
 //  - ffmpeg.exe: gyan.dev "release essentials" build (https://www.gyan.dev/ffmpeg/builds/, .sha256)
-import fs from 'fs';import path from 'path';import crypto from 'crypto';import os from 'os';import {execFileSync} from 'child_process';
-const root=path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1')),'..'),out=path.join(root,'vendor-bin');
+import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import crypto from 'crypto';import os from 'os';import {execFileSync} from 'child_process';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),out=path.join(root,'vendor-bin');
 fs.mkdirSync(out,{recursive:true});
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 async function get(url){const r=await fetch(url,{redirect:'follow',headers:{'user-agent':'desk-phonograph-build'}});if(!r.ok)throw Error(`${url}: HTTP ${r.status}`);return Buffer.from(await r.arrayBuffer());}
@@ -32,5 +32,6 @@ if(force||!fs.existsSync(ff)){
  fs.rmSync(tmp,{recursive:true,force:true});console.log('ffmpeg.exe ok',dir);
 }
 notes.push('ffmpeg.exe sha256 '+sha(fs.readFileSync(ff)));
+for(const f of ['yt-dlp.exe','ffmpeg.exe','FFMPEG-LICENSE.txt'])if(!fs.existsSync(path.join(out,f)))throw Error('missing '+f);
 fs.writeFileSync(path.join(out,'TOOLS.txt'),notes.join('\n')+'\n');
 console.log(notes.join('\n'));

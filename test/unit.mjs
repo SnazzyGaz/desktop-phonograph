@@ -1,9 +1,9 @@
 // Quick checks that need no window: every script parses, the page's CSP still allows its
 // import map, records are sized sensibly for any song length, and user-facing text keeps
 // to plain words (no tool names, no "download").
-import fs from 'fs';import path from 'path';import crypto from 'crypto';import {execFileSync} from 'child_process';import {createRequire} from 'module';
+import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import crypto from 'crypto';import {execFileSync} from 'child_process';import {createRequire} from 'module';
 const require=createRequire(import.meta.url);
-const root=path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1')),'..');
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
 for(const f of ['app/renderer/static/view.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js'])
  {try{const src=fs.readFileSync(path.join(root,f),'utf8');if(f.endsWith('view.js')){const tmp=path.join(root,'test','.view-check.mjs');fs.writeFileSync(tmp,src);try{execFileSync(process.execPath,['--check',tmp]);}finally{fs.rmSync(tmp);}}else execFileSync(process.execPath,['--check',path.join(root,f)]);ok(true,'parses: '+f);}catch(e){ok(false,'parses: '+f);}}

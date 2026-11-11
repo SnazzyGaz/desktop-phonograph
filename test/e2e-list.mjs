@@ -1,9 +1,9 @@
 // A list link becomes a queue: the first plays, only the next one or two are fetched ahead,
 // each arrives as its own sleeve, and when a record ends the next one goes on by itself.
 // Usage: node test/e2e-list.mjs <list link>   (PLAYWRIGHT=/path/to/playwright-core)
-import {createRequire} from 'module';import fs from 'fs';import path from 'path';import os from 'os';
+import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');
-const root=path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1')),'..');
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const link=process.argv[2],data=fs.mkdtempSync(path.join(os.tmpdir(),'dp-list-'));
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
 const app=await _electron.launch({executablePath:require(path.join(root,'node_modules','electron')),args:[root,...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});

@@ -1,13 +1,13 @@
 // End-to-end check of the pet (box or PC): launches the app with a throwaway data folder,
 // plays a local song, scratches, checks the hit test and idle frame rate, and saves stills.
 // Needs playwright-core (any copy: PLAYWRIGHT=/path/to/playwright-core). Usage: node test/e2e.mjs song.mp3 [outdir] [link]
-import {createRequire} from 'module';import fs from 'fs';import path from 'path';import os from 'os';
+import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';
 const require=createRequire(import.meta.url);
 const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');
 const song=path.resolve(process.argv[2]||'test.mp3'),out=path.resolve(process.argv[3]||'e2e-out'),link=process.argv[4]||null;
 fs.mkdirSync(out,{recursive:true});
 const data=fs.mkdtempSync(path.join(os.tmpdir(),'dp-e2e-'));
-const root=path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1')),'..');
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let electronPath;try{electronPath=require(path.join(root,'node_modules','electron'));}catch{}
 const app=await _electron.launch({executablePath:electronPath,args:[root,...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});
 const errors=[];const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1;};
