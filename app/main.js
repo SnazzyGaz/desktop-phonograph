@@ -300,8 +300,8 @@ function friendly(err){
  const e=String(err||'');
  if(/getaddrinfo|Failed to resolve|Temporary failure|timed out|Connection reset|Network is unreachable|No route|Unable to connect|ConnectionError|EAI_AGAIN/i.test(e))return 'I couldn\u2019t reach the internet. Check the connection and try again.';
  if(/Unsupported URL|is not a valid URL|no video formats|No media|Requested format is not available|does not contain|no suitable/i.test(e))return 'That link doesn\u2019t seem to lead to anything I can play.';
- if(/Sign in|login|log in|members-only|age|confirm your age|cookies|private/i.test(e))return 'That one needs someone to sign in, so it can\u2019t be played here.';
  if(/HTTP Error 404|not found|has been removed|deleted|terminated/i.test(e))return 'That link doesn\u2019t go anywhere any more.';
+ if(/Sign in|\blog ?in\b|members-only|age-restricted|\bage\b.{0,20}(verif|restrict|confirm)|confirm your age|--cookies|private video/i.test(e))return 'That one needs someone to sign in, so it can\u2019t be played here.'; /* not plain "age": it is in "webpage" */
  if(/not available|unavailable|blocked|country|region/i.test(e))return 'That one isn\u2019t available here, sorry.';
  if(/HTTP Error 429|Too Many/i.test(e))return 'The website is busy. Give it a minute and try again.';
  if(/live event|is live|premiere/i.test(e))return 'That\u2019s a live stream. Try again when it has finished.';

@@ -20,7 +20,7 @@ const bad=ui.filter(t=>/youtube|yt-dlp|ffmpeg|download|rip\b|ripper/i.test(t));
 ok(ui.length>30&&!bad.length,`user-facing text stays plain (${ui.length} strings checked${bad.length?': '+bad.join(' | '):''})`);
 const readme=fs.readFileSync(path.join(root,'README.md'),'utf8');ok(!/youtube|ripper|downloader/i.test(readme),'README keeps the wording');
 // the clipboard, whatever it hands back (Electron 44+: readText() is a Promise; old API: strings; odd values must never throw)
-{const {readClipboardLink,firstUrl}=require(path.join(root,'app','clip-link.js'));const L='https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4';
+{const {readClipboardLink,firstUrl}=require(path.join(root,'app','clip-link.js'));const L='https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c0/Big_Buck_Bunny_4K.webm/Big_Buck_Bunny_4K.webm.360p.vp9.webm';
  const item=(types,get)=>({types,getType:t=>Promise.resolve(get(t))});
  const cases=[
   ['readText() is a Promise (Electron 44+)',{readText:()=>Promise.resolve('  '+L+'\n')},L],
@@ -50,4 +50,9 @@ const readme=fs.readFileSync(path.join(root,'README.md'),'utf8');ok(!/youtube|ri
  ok(/process\.on\('uncaughtException'/.test(m)&&/process\.on\('unhandledRejection'/.test(m),'main handles uncaught errors itself (no modal box)');
  ok(!/clipboard\.read(Text|HTML|Bookmark|Buffer)\(/.test(m),'main never reads the clipboard directly (only through clip-link.js)');
  const builds=[...m.matchAll(/Menu\.buildFromTemplate\(([^)]{0,12})/g)].map(x=>x[1]);ok(builds.length>=2&&builds.every(b=>b.startsWith('guard(')),`every menu is built through guard() (${builds.length})`);}
+// link errors in plain words, matched to the right cause
+{const m=fs.readFileSync(path.join(root,'app/main.js'),'utf8');const src=/function friendly\(err\)\{[\s\S]*?\n\}/.exec(m)[0];const friendly=new Function(src+';return friendly;')();
+ for(const [err,want] of [['ERROR: [generic] x: Unable to download webpage: HTTP Error 404: Not Found',/go anywhere/],['ERROR: Sign in to confirm your age. This video may be inappropriate',/sign in/],['ERROR: Private video. Sign in if you have been granted access',/sign in/],
+  ['ERROR: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>',/internet/],['ERROR: Unable to download webpage: HTTP Error 429: Too Many Requests',/busy/],['ERROR: Unsupported URL: https://example.com/',/anything I can play/],['ERROR: [generic] Unable to download webpage: HTTP Error 500',/wouldn.t play/]])
+  ok(want.test(friendly(err)),`error words: “${err.slice(7,60)}…” → “${friendly(err)}”`);}
 process.exit(fails?1:0);

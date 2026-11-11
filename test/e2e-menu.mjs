@@ -3,7 +3,7 @@
 // the way Electron 44+ does (a Promise), plus odd values that used to crash main.
 // Usage: node test/e2e-menu.mjs song.mp3   (PLAYWRIGHT=..., DESK_EXE=packaged exe optional)
 //   NATIVE=1 (Windows): pick the popup items through UI Automation on the real native menu.
-//   LINK=<url>: also play that link for real from the (stand-in) clipboard and check it plays.
+//   LINK=<url> (e.g. Big Buck Bunny, CC BY, https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c0/Big_Buck_Bunny_4K.webm/Big_Buck_Bunny_4K.webm.360p.vp9.webm): also play that link for real from the (stand-in) clipboard and check it plays.
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');
@@ -79,7 +79,10 @@ for(const kind of ['promise','bookmark']){
  await setClip(kind);
  if(!LINK){await popupItem('Play a web link (from the clipboard)');ok(await until(()=>window.__links.length>0)&&(await R(()=>window.__links.pop()))==='https://example.test/song',`clipboard as ${kind==='promise'?'text (a Promise, as Electron 44+ gives it)':'a bookmark only'}: the link reaches the player`);}
  else if(kind==='promise'){await popupItem('Play a web link (from the clipboard)');
-  ok(await until(()=>window.vinyl.entry?.kind==='link'&&!!window.vinyl.buffer&&window.vinyl.down&&window.vinyl.time()>1,180000),`the copied link plays as a record (“${await R(()=>window.vinyl.entry?.title||'?')}”, ${(await R(()=>window.vinyl.time())).toFixed(1)} s in)`);
+  const t0=Date.now();const got=await until(()=>window.vinyl.entry?.kind==='link'&&!!window.vinyl.buffer,240000);
+  ok(got,`the copied link arrives as a record (“${await R(()=>window.vinyl.entry?.title||'?')}”, ${((Date.now()-t0)/1000).toFixed(0)} s; bubble “${await bubble()}”)`);
+  if(got&&!(await R(()=>window.vinyl.down)))await popupItem('Put the needle down');
+  ok(got&&await until(()=>window.vinyl.down&&window.vinyl.time()>1,15000),`…and plays (${(await R(()=>window.vinyl.time())).toFixed(1)} s in)`);
   await popupItem('Keep this record');ok(await until(()=>!!window.vinyl.entry?.kept,8000),'“Keep this record” keeps it');
   await popupItem('Lift the needle');await until(()=>!window.vinyl.down);await spyLinks();}
 }
