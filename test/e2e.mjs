@@ -35,8 +35,8 @@ const sc=await page.evaluate(async()=>{const v=window.vinyl,r=v.record.metadata.
 ok(sc.back<sc.t0-.3&&sc.fwd>sc.back+.3,`scratch runs back and forward (${sc.t0.toFixed(2)} → ${sc.back.toFixed(2)} → ${sc.fwd.toFixed(2)})`);
 // frame rate while playing and while idle
 const fps=async()=>page.evaluate(()=>new Promise(res=>{let n=0;const c=window.vinylView.renderer.info.render;const f0=c.frame;setTimeout(()=>res(c.frame-f0),2000);}));
-const playFrames=await fps();
-await page.evaluate(()=>window.vinyl.lift());await page.waitForFunction(()=>!window.vinylView.lastDraw,null,{timeout:60000,polling:200}).catch(()=>console.log('  (scene still settling after 60 s)'));
+await page.waitForTimeout(3000);const playFrames=await fps();
+await page.evaluate(()=>window.vinyl.lift());await page.waitForTimeout(12000);await page.waitForFunction(()=>!window.vinylView.lastDraw,null,{timeout:60000,polling:200}).catch(()=>console.log('  (scene still settling after 60 s)'));
 const idleFrames=await fps();
 console.log('  idle draw reasons:',await page.evaluate(()=>new Promise(res=>{const seen={};const t=setInterval(()=>{const k=window.vinylView.lastDraw||'-';seen[k]=(seen[k]||0)+1;},50);setTimeout(()=>{clearInterval(t);res(JSON.stringify(seen));},1500);})));
 ok(playFrames<=70,`playing draws ≤ ~30 fps (${playFrames/2} fps)`);ok(idleFrames<=4,`idle draws almost nothing (${idleFrames/2} fps)`);
