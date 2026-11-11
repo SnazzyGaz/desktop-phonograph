@@ -4,6 +4,7 @@
 // Usage: node test/e2e-menu.mjs song.mp3   (PLAYWRIGHT=..., DESK_EXE=packaged exe optional)
 //   NATIVE=1 (Windows): pick the popup items through UI Automation on the real native menu.
 //   LINK=<url>: also play that link for real from the (stand-in) clipboard and check it plays.
+process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');const song=path.resolve(process.argv[2]);
@@ -21,7 +22,7 @@ await M(({dialog},f)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths
 const setClip=kind=>M((_,{kind,link})=>{const P=v=>Promise.resolve(v);const c={
  promise:{readText:()=>P(link)},object:{readText:()=>P({})},number:{readText:()=>7},undef:{readText:()=>undefined},throws:{readText:()=>{throw new Error('clipboard busy');}},
  bookmark:{readText:()=>P(''),read:()=>P([{types:['electron application/bookmark'],getType:()=>P({title:'x',url:link})}])}}[kind];global.__deskPhono.setClipboard(c);},{kind,link:LINK||'https://example.test/song'});
-const spyLinks=()=>R(()=>{window.__links=[];window.vinyl.playLink=t=>{window.__links.push(t);return Promise.resolve();};});
+const spyLinks=()=>R(()=>{window.__links=[];const real=window.__realPlayLink||(window.__realPlayLink=window.vinyl.playLink);window.vinyl.playLink=t=>{if(!/^https?:/i.test(String(t)))return real(t);window.__links.push(t);return Promise.resolve();};}); // links are only noted; anything else goes on to the real player, which says what to do
 if(!LINK)await spyLinks();
 async function openPopup(at){
  const c=at||await R(()=>window.vinylView.toClient(0,0,0));const n=await M(()=>global.__deskPhono.popups);
@@ -80,6 +81,7 @@ for(const kind of ['promise','bookmark']){
   await popupItem('Keep this record');ok(await until(()=>!!window.vinyl.entry?.kept,8000),'“Keep this record” keeps it');
   await popupItem('Lift the needle');await until(()=>!window.vinyl.down);await spyLinks();}
 }
+const second=path.join(data,'second song.mp3');fs.copyFileSync(song,second);const nb=await R(()=>window.vinyl.libraryCount);await R(p=>window.vinyl.openPaths([p]),second);await until(new Function('return window.vinyl.libraryCount>'+nb),30000);await until(()=>!!window.vinyl.buffer,60000);await wait(2500);
 const sp=await R(()=>window.vinylView.sleevePoints().filter(p=>!p.empty));const n0=await R(()=>window.vinyl.libraryCount);
 if(sp.length){await popupItem('Put this record away',{x:sp[0].x,y:sp[0].y});ok(await until(new Function('return window.vinyl.libraryCount<'+n0),4000),`“Put this record away” (${n0} → ${await R(()=>window.vinyl.libraryCount)} records)`);}
 else ok(false,'a sleeve to right-click');
@@ -94,7 +96,7 @@ await pick('tray','Play a song from this computer…');ok(await until(()=>window
 await setClip('promise');await pick('tray','Play a web link from the clipboard');ok(await until(()=>window.__links.length>0),'tray “Play a web link from the clipboard”');
 await setClip('throws');await pick('tray','Play a web link from the clipboard');await wait(600);ok(/Copy a web link first/.test(await bubble()),'tray link with a broken clipboard: a hint, no crash');
 await M(()=>{const w=global.__deskPhono.win;const b=w.getBounds();w.setBounds({...b,x:-6000,y:-6000});});
-await pick('tray','Put it back on screen');ok(await mainUntil(()=>{const {screen}=require('electron');const b=global.__deskPhono.win.getBounds(),wa=screen.getPrimaryDisplay().workArea;return b.x>=wa.x-1&&b.y>=wa.y-1&&b.x+b.width<=wa.x+wa.width+1&&b.y+b.height<=wa.y+wa.height+1;}),'tray “Put it back on screen”');
+await pick('tray','Put it back on screen');ok(await mainUntil(({screen})=>{const b=global.__deskPhono.win.getBounds(),wa=screen.getPrimaryDisplay().workArea;return b.x>=wa.x-1&&b.y>=wa.y-1&&b.x+b.width<=wa.x+wa.width+1&&b.y+b.height<=wa.y+wa.height+1;}),'tray “Put it back on screen”');
 // a throw inside any click shows in the pet (logged), never as Electron's modal box
 await M(()=>{setTimeout(()=>{throw new Error('test: a stray error in main');},0);});await wait(800);
 ok(/went wrong/.test(await bubble())&&await M(()=>!!global.__deskPhono.win&&!global.__deskPhono.win.isDestroyed()),'a stray error in main becomes a bubble, the app carries on');
