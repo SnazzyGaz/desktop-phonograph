@@ -49,7 +49,7 @@ function machineClamps(){
  controls.enablePan=false;controls.zoomToCursor=false;controls.minPolarAngle=Math.PI*.2;controls.maxPolarAngle=Math.PI*.47;
  const d=defaultPose(),az=azimuthOf(d.pos,d.target);controls.minAzimuthAngle=az-ORBIT_SWING;controls.maxAzimuthAngle=az+ORBIT_SWING;
  controls.minDistance=R*3.5;controls.maxDistance=R*(ROOM?8.5:7.5);
- if(PET){controls.enableRotate=false;post.setDprCap?.(1.25);controls.minPolarAngle=Math.PI*.12;controls.maxPolarAngle=Math.PI*.5;const pd=defaultPose(),d=pd.pos.distanceTo(pd.target);controls.minDistance=d*.998;controls.maxDistance=d*1.002;} // a band, not a point: OrbitControls sees a 1-ulp clamp as a zoom every frame
+ if(PET){controls.enableRotate=false;post.setDprCap?.(1.25);post.setLite?.(false);controls.minPolarAngle=Math.PI*.12;controls.maxPolarAngle=Math.PI*.5;const pd=defaultPose(),d=pd.pos.distanceTo(pd.target);controls.minDistance=d*.998;controls.maxDistance=d*1.002;} // a band, not a point: OrbitControls sees a 1-ulp clamp as a zoom every frame
 }
 let camTween=null;
 function flyTo(pos,target,dur=.85,done){
@@ -869,7 +869,7 @@ function buildSleeves(){
   sleeves.add(crate);
  }
  all.forEach(({e,empty})=>{const i=racked.findIndex(x=>x.e.id===e.id),j=makeJacket(e,S,T,empty,i>0),home=i>=0?sleeveHome(i,n):sleeveRest.get(e.id);j.userData.racked=i>=0;
-  const was=keep.get(e.id);j.position.copy(was?.p??home.p);j.quaternion.copy(was?.q??home.q);j.userData.home=home;j.renderOrder=i>=0?n-i:0;if(fan.on&&i>=0)j.visible=false;sleeves.add(j);});
+  const was=keep.get(e.id);j.position.copy(was?.p??home.p);j.quaternion.copy(was?.q??home.q);j.userData.home=home;j.renderOrder=i>=0?n-i:0;if(fan.on&&i>=0&&fan.cards.some(c=>c.userData.inCrate&&!c.userData.landed&&c.userData.fanId===e.id))j.visible=false;sleeves.add(j);});
  invalidate();
 }
 window.addEventListener('vinyl-sleeves',e=>{sleeveData=(e.detail?.sleeves||[]).slice();currentSleeve=e.detail?.currentSleeve||null;buildSleeves();
@@ -975,9 +975,13 @@ function buildFanCards(){
   const inCrate=sleeves.children.find(o=>o.userData.sleeveId===e.id&&o.userData.racked);
   const from=inCrate?{p:inCrate.position.clone(),q:inCrate.quaternion.clone(),s:1}:{p:deep.clone(),q:q0.clone(),s:1};
   j.position.copy(from.p);j.quaternion.copy(from.q);j.userData.from=from;j.userData.order=i;
+  // only a sleeve that is really in the crate rises out of it (and stands in for it until it flies);
+  // the rest of the library appears in its place in the fan instead
+  j.userData.inCrate=!!inCrate;j.visible=!!inCrate;
   j.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;}});
   fan.g.add(j);return j;});
- for(const o of sleeves.children)if(o.userData.racked)o.visible=false; // they have risen out of the crate
+ const out=new Set(fan.cards.filter(c=>c.userData.inCrate).map(c=>c.userData.fanId));
+ for(const o of sleeves.children)if(o.userData.racked&&out.has(o.userData.sleeveId))o.visible=false; // they have risen out of the crate
 }
 function fanSlots(){
  const n=fan.cards.length,V=Math.min(n,FAN_MAX);fan.scroll=Math.max(0,Math.min(fan.scroll,n-V));
@@ -1011,7 +1015,13 @@ function layoutFan(restart=false){
   const q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right,b.back.clone().negate(),up));
   const to={p:center.clone().addScaledVector(up,-S*sc/2),q,s:sc,center,up,half:S*sc/2,shown,angle:a};
   const prev=c.userData.to;c.userData.to=to;
-  if(restart){c.userData.anim={from:c.userData.from,start:now+i*FAN_STAGGER*(shown?1:.3),dur:FAN_DUR,arc:true};}
+  if(restart){
+   if(c.userData.inCrate&&shown)c.userData.anim={from:c.userData.from,start:now+i*FAN_STAGGER,dur:FAN_DUR,arc:true};
+   else{ // not in the crate (or not shown): grows in where it belongs, never out of the crate
+    c.userData.from={p:to.p.clone(),q:to.q.clone(),s:to.s*.02};c.position.copy(to.p);c.quaternion.copy(to.q);c.scale.setScalar(to.s*.02);
+    c.userData.anim=shown?{from:c.userData.from,start:now+i*FAN_STAGGER,dur:FAN_DUR*.8,arc:false}:null;}
+   if(c.userData.inCrate&&!shown){const j=sleeves.children.find(o=>o.userData.sleeveId===c.userData.fanId&&o.userData.racked);if(j)j.visible=true;c.userData.inCrate=false;} // stays in the crate
+  }
   else if(prev&&(prev.center.distanceToSquared(center)>1e-6||Math.abs(prev.s-sc)>1e-5)){c.userData.anim={from:{p:c.position.clone(),q:c.quaternion.clone(),s:c.scale.x},start:now,dur:hot||prev.s>sc?160:260,arc:false};}
   c.renderOrder=10+(hot?50:k);
  });
@@ -1050,8 +1060,9 @@ function updateFan(){
   if(an?.arc)arcPoint(from.p,to.p,e,tmp);else tmp.copy(from.p).lerp(to.p,e);
   const r=an?.arc?smooth(.18,.85,e):e; // on the flight it turns and shrinks only once clear of the crate
   c.position.copy(tmp);c.quaternion.copy(from.q).slerp(to.q,r);c.scale.setScalar(from.s+(to.s-from.s)*r);
-  c.visible=fan.closing?u<.999:(to.shown||u<1);
+  c.visible=fan.closing?(c.userData.tuck!=='none'&&u<.999):(to.shown||(u<1&&!!an));
   if(fan.closing&&u<1)allBack=false;
+  if(fan.closing&&u>=1&&c.userData.tuck==='crate'&&!c.userData.landed){c.userData.landed=true;const j=sleeves.children.find(o=>o.userData.sleeveId===c.userData.fanId&&o.userData.racked);if(j)j.visible=true;}
   if(u>=1&&an)c.userData.anim=null;
  }
  if(fan.closing&&allBack)endFan();
@@ -1075,9 +1086,13 @@ async function fanOpen(){
 function fanClose(now=false){
  if(!fan.on||fan.closing)return;fan.closing=true;setHoverNow(null);const t=performance.now();
  const n=fan.cards.length;
- fan.cards.forEach((c,i)=>{const j=sleeves.children.find(o=>o.userData.sleeveId===c.userData.fanId&&o.userData.racked);
-  const home=j?.userData.home?{p:j.userData.home.p.clone(),q:j.userData.home.q.clone(),s:1}:{...c.userData.from,s:1};
-  c.userData.home=home;c.userData.anim={from:{p:c.position.clone(),q:c.quaternion.clone(),s:c.scale.x},start:t+(now?0:(n-1-i)*FAN_STAGGER*.6),dur:now?1:FAN_DUR*.85,arc:true};});
+ // Exactly what came out goes back: a card whose sleeve is in the crate flies home to it; a card
+ // for a record that isn't in the crate shrinks away where it is; cards out of view just go.
+ fan.cards.forEach((c,i)=>{const j=c.userData.inCrate?sleeves.children.find(o=>o.userData.sleeveId===c.userData.fanId&&o.userData.racked):null;
+  const from={p:c.position.clone(),q:c.quaternion.clone(),s:c.scale.x},start=t+(now?0:(n-1-i)*FAN_STAGGER*.6);
+  if(!c.visible){c.userData.tuck='none';c.userData.home={...from};c.userData.anim=null;if(j)j.visible=true;return;}
+  if(j?.userData.home){c.userData.tuck='crate';c.userData.home={p:j.userData.home.p.clone(),q:j.userData.home.q.clone(),s:1};c.userData.anim={from,start,dur:now?1:FAN_DUR*.85,arc:true};}
+  else{c.userData.tuck='away';c.userData.home={p:from.p.clone(),q:from.q.clone(),s:Math.max(1e-3,from.s*.02)};c.userData.anim={from,start,dur:now?1:FAN_DUR*.5,arc:false};}});
  invalidate(4);
 }
 function endFan(){
@@ -1129,7 +1144,7 @@ function setDetail(on){
  const top=disc.getObjectByName('vinyl-grooves');if(!top)return;
  top.material.envMapIntensity=on?VINYL_ENV_HELD:VINYL_ENV;invalidate();
 }
-const INSPECT_IN=1.0,INSPECT_OUT=.95;
+const INSPECT_IN=1.0,INSPECT_OUT=.95,INSPECT_PIXELS=1.1e6; // drawing-buffer pixels while inspecting
 function beginInspection(){
  const v=window.vinyl;if(!v.record||inspect.active||!disc.getObjectByName('vinyl-grooves'))return;
  v.setInspecting(true);drag=false;armHold=null;sleeveDrag=null;sleevePop=null;dropIn=null;disc.position.set(0,0,0);
@@ -1149,7 +1164,10 @@ function loosenInspectCamera(){
  controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.minPolarAngle=.02;controls.maxPolarAngle=Math.PI-.02;
  controls.minDistance=R*.65;controls.maxDistance=R*5;controls.enablePan=true;controls.zoomToCursor=true;controls.enabled=true;stopControlMomentum();controls.update();
  if(PET){ // the pet's inspect: the player never turns; drags turn the record in your hands, the wheel only brings it closer
-  controls.enableRotate=false;controls.enablePan=false;controls.zoomToCursor=false;post.setDprCap?.(2);clampInspectZoom(true);}
+  controls.enableRotate=false;controls.enablePan=false;controls.zoomToCursor=false;
+  // sharper than the idle pet, but within a pixel budget: the grown window is mostly empty glass,
+  // and full device resolution of all of it made inspect crawl on big or high-DPI screens
+  post.setDprCap?.(1.5,INSPECT_PIXELS);post.setLite?.(true);clampInspectZoom(true);}
 }
 /* ---------- the pet's inspect room ----------
    The pet's window is small, so a record brought close would run into its straight edges. While
@@ -1160,9 +1178,37 @@ let petFrame=null; // {w0,h0,ox,oy,w,h,closing}
 const roomUsers=new Set(); // 'inspect', 'fan': the window stays grown while either needs it
 async function petRoom(on,who='inspect'){
  if(!window.desk?.inspectRoom)return;
- if(on){const had=roomUsers.size>0;roomUsers.add(who);if(had&&petFrame&&!petFrame.closing)return;
-  const plan=await window.desk.inspectRoom('plan');if(!plan||!roomUsers.has(who))return;petFrame={...plan,closing:false};await window.desk.inspectRoom('grow');}
- else{roomUsers.delete(who);if(!roomUsers.size&&petFrame){petFrame.closing=true;window.desk.inspectRoom('shrink');}}
+ if(on){const had=roomUsers.size>0;roomUsers.add(who);if(had&&petFrame&&!petFrame.closing)return roomQ;
+  const plan=await window.desk.inspectRoom('plan');if(!plan||!roomUsers.has(who))return;petFrame={...plan,closing:false};
+  return reframe('grow',plan.w,plan.h);}
+ else{roomUsers.delete(who);if(!roomUsers.size&&petFrame){const f=petFrame;f.closing=true;return reframe('shrink',f.w0,f.h0);}}
+}
+/* Growing or shrinking the window must not show the pet anywhere else, even for a frame. When the
+   OS resizes a window it keeps showing the last picture, pinned to the new top-left corner, until a
+   new one arrives; and the first new one used to come before the camera knew the new size. So:
+   hide the page and let that blank picture reach the screen, resize, wait until the canvas has the
+   new size, set the camera (view offset) and draw at once, and only then show it again. Requests
+   queue so a grow and a shrink never interleave. */
+let roomQ=Promise.resolve(),reframing=false;const reframeLog=[];
+const nextPaint=()=>new Promise(r=>{let done=false;const t=setTimeout(()=>{done=true;r();},60);requestAnimationFrame(()=>{if(!done){clearTimeout(t);r();}});});
+function reframe(step,w,h){
+ const run=async()=>{
+  const root=document.documentElement,T0=performance.now(),L={step,w,h};root.classList.add('reframing');reframing=true;
+  try{
+   // a real, empty WebGL frame (a CSS change alone isn't always handed to the screen)
+   {renderer.setRenderTarget(null);const cc=renderer.getClearColor(new THREE.Color()),ca=renderer.getClearAlpha();renderer.setClearColor(0x000000,0);renderer.clear(true,true,true);renderer.setClearColor(cc,ca);}
+   await nextPaint();await nextPaint();await nextPaint(); // the blank picture has been handed to the screen
+   while(performance.now()-T0<(window.__reframeHold||50))await nextPaint();
+   L.hidden=performance.now()-T0;await window.desk.inspectRoom(step);L.resized=performance.now()-T0;
+   const t0=performance.now();
+   while(performance.now()-t0<800&&!(Math.abs(view.clientWidth-w)<3&&Math.abs(view.clientHeight-h)<3))await nextPaint();
+   L.sized=performance.now()-T0;L.got=[view.clientWidth,view.clientHeight];
+   resize();scene.updateMatrixWorld();drawFrame(performance.now());lastDrawAt=performance.now();
+   await nextPaint();L.drawn=performance.now()-T0;
+  }catch(e){console.warn('reframe',e);L.error=String(e);}
+  finally{reframing=false;root.classList.remove('reframing');invalidate(3);reframeLog.push(L);if(reframeLog.length>20)reframeLog.shift();}
+ };
+ return roomQ=roomQ.then(run,run);
 }
 // How close the camera may come: the record (a sphere of its radius) stays inside the drawable area.
 function inspectFitDistance(){
@@ -1702,7 +1748,7 @@ let shadowRenders=0,shadowWake=0;
 function updateShadows(now){
  const sig=shadowSignature();
  if(!(Math.abs(sig-shadowSig)<=1e-6))shadowPending=true; // written so the first NaN compare counts as a change: otherwise the shadow map froze after its first render
- const gap=PET&&!drag&&!armHold&&!sleeveDrag&&!inspect.active&&!dropIn&&!outgoing.children.length?120:33; // the pet: the dancer's shadow need not follow every frame
+ const gap=PET&&!drag&&!armHold&&!sleeveDrag&&!dropIn&&!outgoing.children.length?120:33; // (a held record's shadow on the cabinet needn't follow every frame either) // the pet: the dancer's shadow need not follow every frame
  if(shadowPending&&now-shadowAt>gap){renderer.shadowMap.needsUpdate=true;shadowRenders++;shadowSig=sig;shadowAt=now;shadowPending=false;}
  else if(shadowPending){if(!PET)invalidate(1);else if(!shadowWake)shadowWake=setTimeout(()=>{shadowWake=0;invalidate(1);},Math.max(1,gap-(now-shadowAt)+1));} // the pet: one timed wake, not a redraw every frame (that bypassed the frame cap)
 }
@@ -1776,20 +1822,28 @@ function tickScene(dt, nowMs){
  let busy=why.length>0;window.vinylView.lastDraw=why.join(',')||(dirty>0?'dirty':'');
  return {busy, why, nowMs};
 }
+const perfLog=[]; // [time, ms spent in drawFrame] for the last 600 draws (tests read it)
 function drawFrame(nowMs){
+ const t0=performance.now();drawFrameInner(nowMs);const t1=performance.now();perfLog.push([t1,t1-t0]);if(perfLog.length>600)perfLog.shift();
+}
+function drawFrameInner(nowMs){
  updateShadows(nowMs);
  post.focus?.(inspect.active?camera.position.distanceTo(disc.position):camera.position.distanceTo(focusPoint.set(R*.15,0,4)));
  post.render(nowMs);if(dirty>0)dirty--;placeTitle();
  if(!firstDrawn){firstDrawn=true;performance.mark?.('vv:first');renderer.domElement.setAttribute?.('data-ready','');
   shiba?.load().then(ok=>{if(ok){renderer.shadowMap.needsUpdate=true;shadowPending=true;performance.mark?.('vv:shiba');}invalidate(3);});}
 }
-let sleepT=null,rafOn=false,lastDrawAt=0;
+let sleepT=null,rafOn=false,lastDrawAt=0,lastInputAt=0;
+for(const t of ['pointermove','pointerdown','wheel'])renderer.domElement.addEventListener(t,()=>{lastInputAt=performance.now();},{passive:true});
 function frame(){
- rafOn=false;
+ rafOn=false;if(reframing)return; // reframe() draws the one frame itself, then wakes the loop
  if(!PET)requestAnimationFrame(frame);
  const now=performance.now();
  const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy||(fan.g&&fan.cards.some(c=>c.userData.anim));
  if(PET&&!hands&&dirty<=0&&now-lastDrawAt<31){rafOn=true;requestAnimationFrame(frame);return;} // at most ~30 fps while it only spins (rAF-quantised)
+ // inspect: up to 60 fps while you turn or zoom it (or it flies), ~30 while it is only held; never the
+ // monitor's full rate (a 144 Hz screen drew every frame of a big window)
+ if(PET&&inspect.active&&now-lastDrawAt<((now-lastInputAt<300||camTween)?15:31)){rafOn=true;requestAnimationFrame(frame);return;}
  const raw=Math.max(.001,(now-lastFrame)/1000),dt=Math.min(.25,raw);lastFrame=now;
  const {busy}=tickScene(dt, now);
  const draw=busy||dirty>0||drag||armHold||sleeveDrag;
@@ -1802,7 +1856,8 @@ Object.assign(window.vinylView,{
  get inspect(){return inspect}, get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
  swapToy, get phonograph(){return phonograph},
- fanOpen, fanClose, fanScroll, fanPathCheck, pressKey, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
+ fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, setQuality:m=>post.setMode(m),
+ fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},
  beginInspection, returnRecord, finishInspection, flyTo, snapToDefault, defaultPose, presentPose,
  keepBelowCeiling, keepInRoom, armSwapFromSleeve, captureExtract, keepDiscAwayFromCamera, roomBounds,
@@ -1812,6 +1867,8 @@ Object.assign(window.vinylView,{
 Object.defineProperties(window.vinylView,{ // live getters (Object.assign would copy their values once)
  fan:{get(){return {on:fan.on,closing:fan.closing,scroll:fan.scroll,hover:fan.hover,count:fan.cards.length,cards:fan.cards.map(c=>({id:c.userData.fanId,shown:!!c.userData.to?.shown,moving:!!c.userData.anim,...(c.userData.to?toClient(c.userData.to.center):{})}))};}},
  fanActive:{get(){return fan.on;}},
+ reframeLog:{get(){return reframeLog.slice();}},
+ perf:{get(){const gl=renderer.getContext();return {log:perfLog.slice(),buffer:[gl.drawingBufferWidth,gl.drawingBufferHeight],dpr:renderer.getPixelRatio(),post:post.state(),shadowRenders};}},
  keys:{get(){return {press:{...keyFx.press},glow:{...keyFx.glow},hover:keyFx.hover};}},
  hover:{get(){return {id:hov.id,shown:!!hoverEl?.classList.contains('on'),x:hov.x,y:hov.y,title:hoverEl?.firstElementChild?.textContent||'',artist:hoverEl?.lastElementChild?.textContent||''};}},
  nowPlayingKey:{get(){return NOW.key;}}});

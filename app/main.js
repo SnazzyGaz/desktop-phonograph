@@ -98,13 +98,25 @@ ipcMain.on('pet:solid',(e,solid)=>{if(!win)return;const ig=!solid;if(ig!==ignori
 let mv=null,fling=null;
 // Inspecting: the window grows round the pet (inside its screen) so a record brought close never meets its edges.
 let room=null;
+// Before the window is resized the renderer blanks itself (see reframe() in view.js); the OS keeps
+// showing the window's last picture while it resizes, so wait until that picture really is the blank one.
+async function blankShown(limit=500){
+ const t0=Date.now();
+ while(Date.now()-t0<limit&&win&&!win.isDestroyed()){
+  try{const img=await win.webContents.capturePage(),b=img.toBitmap(),{width:w,height:h}=img.getSize();let lit=0;
+   for(let y=2;y<h;y+=5)for(let x=2;x<w;x+=5){const i=(y*w+x)*4;if(b[i+3]>8&&Math.max(b[i],b[i+1],b[i+2])>12&&++lit>3)break;}
+   if(lit<=3)return true;}catch{return false;}
+  await new Promise(r=>setTimeout(r,12));
+ }
+ return false;
+}
 ipcMain.handle('pet:inspect-room',(e,step)=>{
  if(!win||win.isDestroyed())return null;
  if(step==='plan'){const b=bounds,wa=screen.getDisplayMatching(b).workArea;
   const x0=Math.max(wa.x,b.x-b.width),y0=Math.max(wa.y,b.y-Math.round(b.height*.9)),x1=Math.min(wa.x+wa.width,b.x+b.width*2),y1=Math.min(wa.y+wa.height,b.y+Math.round(b.height*1.9));
   room={x:x0,y:y0,width:x1-x0,height:y1-y0};return {w0:b.width,h0:b.height,ox:b.x-x0,oy:b.y-y0,w:room.width,h:room.height};}
- if(step==='grow'&&room){stopFling();mv=null;win.setBounds(room);log('inspect room',JSON.stringify(room));return true;}
- if(step==='shrink'){room=null;win.setBounds(bounds);return true;}
+ if(step==='grow'&&room){stopFling();mv=null;return blankShown().then(()=>{if(room&&win&&!win.isDestroyed()){win.setBounds(room);log('inspect room',JSON.stringify(room));}return true;});}
+ if(step==='shrink'){room=null;return blankShown().then(()=>{if(win&&!win.isDestroyed()&&!room)win.setBounds(bounds);return true;});}
  return null;
 });
 ipcMain.on('pet:move-start',(e,sx,sy)=>{if(room)return;stopFling();mv={sx,sy,x0:bounds.x,y0:bounds.y,trail:[{x:sx,y:sy,t:Date.now()}]};});
