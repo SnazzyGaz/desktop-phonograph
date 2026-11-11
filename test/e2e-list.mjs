@@ -6,7 +6,8 @@ const require=createRequire(import.meta.url);const {_electron}=require(process.e
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const link=process.argv[2],data=fs.mkdtempSync(path.join(os.tmpdir(),'dp-list-'));
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
-const app=await _electron.launch({executablePath:require(path.join(root,'node_modules','electron')),args:[root,...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});
+const exe=process.env.DESK_EXE;
+const app=await _electron.launch({executablePath:exe||require(path.join(root,'node_modules','electron')),args:[...(exe?[]:[root]),...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});
 const page=await app.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
 await page.waitForSelector('canvas[data-ready]',{state:'attached',timeout:90000});
 const t0=Date.now();page.evaluate(l=>window.vinyl.playLink(l),link);

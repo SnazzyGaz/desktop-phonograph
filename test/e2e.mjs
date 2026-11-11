@@ -9,7 +9,8 @@ fs.mkdirSync(out,{recursive:true});
 const data=fs.mkdtempSync(path.join(os.tmpdir(),'dp-e2e-'));
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let electronPath;try{electronPath=require(path.join(root,'node_modules','electron'));}catch{}
-const app=await _electron.launch({executablePath:electronPath,args:[root,...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});
+const exe=process.env.DESK_EXE; // test a built app instead of the source
+const app=await _electron.launch({executablePath:exe||electronPath,args:[...(exe?[]:[root]),...(process.platform==='linux'?['--no-sandbox','--use-gl=angle','--use-angle=swiftshader']:[])],env:{...process.env,DESK_PHONO_DATA:data}});
 const errors=[];const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)process.exitCode=1;};
 const page=await app.firstWindow();
 page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('pageerror',e=>errors.push(String(e)));
