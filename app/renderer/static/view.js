@@ -118,7 +118,8 @@ const ZOOM_NOTCH=Math.log(1.11),ZOOM_W=11; // per 100 px of wheel; spring rate (
 const zoom={goal:null,vel:0,x:0,y:0};
 const camDist=()=>camera.position.distanceTo(controls.target);
 controls._handleMouseWheel=function(e){
- if(PET&&!inspect.active){const pk=pickAt(e);if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}window.petShell?.wheel(e);return;}
+ if(PET&&fan.on){fanScroll(Math.sign(e.deltaY));return;}
+if(PET&&!inspect.active){const pk=pickAt(e);if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}window.petShell?.wheel(e);return;}
  if(camTween&&!inspect.active)camTween=null;
  const lo=Math.log(controls.minDistance),hi=Math.log(controls.maxDistance);
  if(zoom.goal===null){zoom.goal=Math.log(camDist());zoom.vel=0;}
@@ -575,6 +576,141 @@ function engrave(text,w,h,color='#d9bd7a',lit=false){
   const mat=lit?new THREE.MeshStandardMaterial({map:t,transparent:true,depthWrite:false,roughness:.6,metalness:0}):new THREE.MeshBasicMaterial({map:t,transparent:true,depthWrite:false});
   const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);m.rotation.x=Math.PI/2;return m;}catch{return null;}
 }
+/* ---------- the transport: three bakelite push buttons on the cabinet front ----------
+   Upper right of the front panel, in line with the maker's plate: Previous, Play/Pause, Next.
+   (The dancer's brass pip sits low in the right-hand corner and the Now Playing card on the
+   drawer below, so none of them crowd each other.) Each one pushes in when pressed, glows a
+   little when the cursor is on it, and runs the same action as the menu. */
+const TRANSPORT=['prev','toggle','next'];
+const keyFx={press:{prev:1,toggle:1,next:1},glow:{prev:0,toggle:0,next:0},hover:null};
+function keyGlyph(kind){
+ if(typeof document.createElement!=='function')return null;
+ const s=256,c=document.createElement('canvas');c.width=c.height=s;const g=c.getContext('2d');if(!g)return null;
+ g.fillStyle='#e6c886';g.strokeStyle='#e6c886';g.lineJoin='round';g.lineWidth=s*.012;
+ const tri=(x0,dir,w,h)=>{g.beginPath();g.moveTo(x0,s/2-h/2);g.lineTo(x0+dir*w,s/2);g.lineTo(x0,s/2+h/2);g.closePath();g.fill();g.stroke();};
+ const bar=(x,w,h)=>{g.fillRect(x,s/2-h/2,w,h);};
+ const H=s*.34;
+ if(kind==='prev'){bar(s*.25,s*.055,H);tri(s*.52,-1,s*.2,H);tri(s*.75,-1,s*.2,H);}
+ else if(kind==='next'){tri(s*.25,1,s*.2,H);tri(s*.48,1,s*.2,H);bar(s*.695,s*.055,H);}
+ else{tri(s*.22,1,s*.25,H);bar(s*.56,s*.07,H);bar(s*.69,s*.07,H);}
+ // deco engraving: a fine double ring and four tiny rays at the quarters
+ g.lineWidth=s*.018;g.beginPath();g.arc(s/2,s/2,s*.44,0,Math.PI*2);g.stroke();
+ g.lineWidth=s*.008;g.beginPath();g.arc(s/2,s/2,s*.405,0,Math.PI*2);g.stroke();
+ for(let i=0;i<4;i++){const a=i*Math.PI/2+Math.PI/4;g.beginPath();g.moveTo(s/2+Math.cos(a)*s*.405,s/2+Math.sin(a)*s*.405);g.lineTo(s/2+Math.cos(a)*s*.44,s/2+Math.sin(a)*s*.44);g.lineWidth=s*.02;g.stroke();}
+ const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t;
+}
+function buildTransport(R,W,D,bodyBot,H,brass,bakelite){
+ const g=new THREE.Group();g.name='transport';
+ const faceY=-D+R*.02,z=bodyBot+H*.665,r=R*.058;
+ TRANSPORT.forEach((id,i)=>{
+  const k=new THREE.Group();k.name='transport-'+id;k.userData={pick:'transport',key:id};k.position.set(R*.63+i*R*.165,faceY,z);
+  const bezel=new THREE.Mesh(new THREE.TorusGeometry(r*1.12,R*.008,12,40),brass);bezel.rotation.x=Math.PI/2;k.add(bezel);
+  const press=new THREE.Group();press.name='press';k.add(press);
+  const mat=bakelite.clone();mat.emissive=new THREE.Color(0xff9a3c);mat.emissiveIntensity=0;
+  const cap=new THREE.Mesh(new THREE.CylinderGeometry(r,r*1.03,R*.032,40),mat);cap.position.y=-R*.012;press.add(cap);
+  const dome=new THREE.Mesh(new THREE.SphereGeometry(r,32,10,0,Math.PI*2,0,.32),mat);dome.rotation.x=Math.PI;dome.position.y=-R*.028+r*Math.cos(.32);dome.scale.set(1,1,1);press.add(dome);
+  const tex=keyGlyph(id);
+  if(tex){const gm=new THREE.MeshStandardMaterial({map:tex,transparent:true,depthWrite:false,metalness:.75,roughness:.32,color:0xffffff,emissive:new THREE.Color(0xffc070),emissiveMap:tex,emissiveIntensity:0,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3});
+   const gl=new THREE.Mesh(new THREE.PlaneGeometry(r*1.9,r*1.9),gm);gl.name='glyph';gl.rotation.x=Math.PI/2;gl.position.y=-R*.03-.15;press.add(gl);}
+  const hitM=new THREE.MeshBasicMaterial({visible:false});hitM.userData.shared=true;
+  const hit=new THREE.Mesh(new THREE.SphereGeometry(r*1.45,12,8),hitM);hit.name='transport-hit';k.add(hit);
+  k.userData.mats=[mat,press.getObjectByName('glyph')?.material].filter(Boolean);k.userData.press=press;
+  g.add(k);
+ });
+ return g;
+}
+function pressKey(id){
+ if(!TRANSPORT.includes(id))return;keyFx.press[id]=reduce()?1:0;toyClick();invalidate(3);
+ try{const r=window.vinyl?.transport?.(id);r?.catch?.(e=>window.desk?.log?.('transport',String(e?.message||e)));}catch(e){window.desk?.log?.('transport',String(e?.message||e));window.petShell?.say?.('That didn’t work just then. Give it another go.','error');}
+}
+function updateKeys(dt){
+ const t=phonograph.getObjectByName('transport');if(!t)return false;let busy=false;
+ for(const k of t.children){const id=k.userData.key;if(!id)continue;
+  if(keyFx.press[id]<1){keyFx.press[id]=Math.min(1,keyFx.press[id]+dt/.18);busy=true;}
+  const want=keyFx.hover===id?1:0,gl=keyFx.glow[id];if(Math.abs(want-gl)>.005){keyFx.glow[id]=gl+(want-gl)*Math.min(1,dt*14);busy=true;}else keyFx.glow[id]=want;
+  k.userData.press.position.y=R*.014*Math.sin(Math.PI*keyFx.press[id]);
+  const [cap,glyph]=k.userData.mats;if(cap)cap.emissiveIntensity=.1*keyFx.glow[id];if(glyph)glyph.emissiveIntensity=.32*keyFx.glow[id];
+ }
+ return busy;
+}
+/* ---------- the drawer and its Now Playing card ----------
+   A shallow drawer low on the cabinet front, with a cream card under a brass frame (as on an
+   old filing drawer) that says what is on the turntable. The card is a canvas texture: paper
+   with grain and age, ink that spreads a little, the frame's shadow along its top edge. */
+const NOW={tex:null,canvas:null,key:null};
+const CARD_W=.66,CARD_H=.2; // in R
+function seeded(n){let s=n|0||1;return ()=>((s=Math.imul(s^s>>>15,2246822507)^Math.imul(s^s>>>13,3266489909))>>>0)/4294967296;}
+function fitText(g,text,maxW,size,min,weight,family,style=''){
+ let px=size;const font=p=>`${style} ${weight} ${p}px ${family}`.trim();
+ g.font=font(px);while(g.measureText(text).width>maxW&&px>min){px-=2;g.font=font(px);}
+ if(g.measureText(text).width<=maxW)return text;
+ let t=text;while(t.length>1&&g.measureText(t+'…').width>maxW)t=t.slice(0,-1);return t.trimEnd()+'…';
+}
+function inkText(g,text,x,y,color){ // a soft halo first (ink bleeding into the paper), then the type
+ g.save();g.fillStyle=color;g.globalAlpha=.35;g.shadowColor='rgba(60,32,10,.6)';g.shadowBlur=3;g.fillText(text,x,y);g.restore();
+ g.save();g.fillStyle=color;g.globalAlpha=.94;g.fillText(text,x,y);g.restore();
+}
+function drawNowPlaying(np){
+ if(typeof document.createElement!=='function')return;
+ if(!NOW.canvas){NOW.canvas=document.createElement('canvas');NOW.canvas.width=1024;NOW.canvas.height=Math.round(1024*CARD_H/CARD_W);}
+ const c=NOW.canvas,g=c.getContext('2d');if(!g)return;const W=c.width,H=c.height,rnd=seeded(1931);
+ const serif='Georgia, "Times New Roman", "Liberation Serif", "DejaVu Serif", serif';
+ // aged cream card
+ const base=g.createLinearGradient(0,0,W,H);base.addColorStop(0,'#efe3c6');base.addColorStop(.6,'#e8d9b6');base.addColorStop(1,'#e2cfa6');g.fillStyle=base;g.fillRect(0,0,W,H);
+ const img=g.getImageData(0,0,W,H),d=img.data; // paper grain
+ for(let i=0;i<d.length;i+=4){const n=(rnd()-.5)*16;d[i]+=n;d[i+1]+=n;d[i+2]+=n*.8;}
+ g.putImageData(img,0,0);
+ g.globalAlpha=.07;g.strokeStyle='#8a6a3a';g.lineWidth=1; // fibres
+ for(let i=0;i<90;i++){const x=rnd()*W,y=rnd()*H,a=rnd()*Math.PI,l=8+rnd()*26;g.beginPath();g.moveTo(x,y);g.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l*.4);g.stroke();}
+ g.globalAlpha=1;
+ for(let i=0;i<7;i++){const x=rnd()*W,y=rnd()*H,r=3+rnd()*9,f=g.createRadialGradient(x,y,0,x,y,r);f.addColorStop(0,'rgba(150,105,50,.16)');f.addColorStop(1,'rgba(150,105,50,0)');g.fillStyle=f;g.fillRect(x-r,y-r,2*r,2*r);} // foxing
+ g.globalCompositeOperation='multiply';const v=g.createRadialGradient(W/2,H/2,H*.4,W/2,H/2,W*.62);v.addColorStop(0,'#ffffff');v.addColorStop(1,'#cdb48a');g.fillStyle=v;g.fillRect(0,0,W,H);g.globalCompositeOperation='source-over';
+ // the frame's shadow: heavier along the top, a little on the sides
+ const top=g.createLinearGradient(0,0,0,H*.22);top.addColorStop(0,'rgba(40,24,8,.45)');top.addColorStop(1,'rgba(40,24,8,0)');g.fillStyle=top;g.fillRect(0,0,W,H*.22);
+ for(const [x0,x1] of [[0,W*.04],[W,W*.96]]){const s=g.createLinearGradient(x0,0,x1,0);s.addColorStop(0,'rgba(40,24,8,.28)');s.addColorStop(1,'rgba(40,24,8,0)');g.fillStyle=s;g.fillRect(Math.min(x0,x1),0,W*.04,H);}
+ const b=g.createLinearGradient(0,H,0,H*.9);b.addColorStop(0,'rgba(40,24,8,.18)');b.addColorStop(1,'rgba(40,24,8,0)');g.fillStyle=b;g.fillRect(0,H*.9,W,H*.1);
+ g.textAlign='center';g.textBaseline='middle';
+ // NOW PLAYING, small spaced capitals between fine rules
+ g.font=`700 ${Math.round(H*.13)}px ${serif}`;if('letterSpacing' in g)g.letterSpacing=`${Math.round(H*.035)}px`;
+ const head='NOW PLAYING',hw=g.measureText(head).width;inkText(g,head,W/2,H*.27,'#6a4320');if('letterSpacing' in g)g.letterSpacing='0px';
+ g.strokeStyle='rgba(106,67,32,.7)';g.lineWidth=2;for(const s of [-1,1]){g.beginPath();g.moveTo(W/2+s*(hw/2+18),H*.27);g.lineTo(W/2+s*(hw/2+18+W*.12),H*.27);g.stroke();}
+ if(!np){g.font=`italic 400 ${Math.round(H*.2)}px ${serif}`;inkText(g,'— no record —',W/2,H*.57,'#7a5a3a');}
+ else{
+  const title=fitText(g,String(np.title||'Record'),W*.88,Math.round(H*.3),Math.round(H*.17),700,serif);
+  inkText(g,title,W/2,np.artist?H*.54:H*.6,'#2a170a');
+  if(np.artist){const a=fitText(g,String(np.artist),W*.8,Math.round(H*.17),Math.round(H*.12),400,serif,'italic');inkText(g,a,W/2,H*.8,'#4a3018');}
+ }
+ if(!NOW.tex){NOW.tex=new THREE.CanvasTexture(c);NOW.tex.colorSpace=THREE.SRGBColorSpace;NOW.tex.userData.shared=true;}
+ NOW.tex.anisotropy=renderer.capabilities?.getMaxAnisotropy?.()||1;NOW.tex.needsUpdate=true;invalidate(2);
+}
+function refreshNowPlaying(){
+ const np=window.vinyl?.nowPlaying||null,k=np?np.title+'\u0001'+np.artist:'';
+ if(k===NOW.key&&NOW.tex)return;NOW.key=k;drawNowPlaying(np);
+}
+function buildDrawer(R,W,D,bodyBot,brass,wood){
+ const g=new THREE.Group();g.name='drawer';
+ const w=R*1.0,h=R*.3,z0=bodyBot+R*.16,y=-D+R*.012;
+ const front=slab(w,R*.03,h,R*.01,wood,4);front.position.set(0,y,z0);front.name='drawer-front';g.add(front);
+ const face=y-R*.015,cz=z0+h/2;
+ refreshNowPlaying();
+ const card=new THREE.Mesh(new THREE.PlaneGeometry(R*CARD_W,R*CARD_H),new THREE.MeshStandardMaterial({map:NOW.tex,roughness:.88,metalness:0}));
+ card.name='now-playing';card.rotation.x=Math.PI/2;card.position.set(0,face-R*.002,cz);g.add(card);
+ // brass frame: a flat bezel with a lip, four screw heads
+ const fw=R*(CARD_W+.045),fh=R*(CARD_H+.04),iw=R*CARD_W*.995,ih=R*CARD_H*.99;
+ const sh=new THREE.Shape();sh.moveTo(-fw/2,-fh/2);sh.lineTo(fw/2,-fh/2);sh.lineTo(fw/2,fh/2);sh.lineTo(-fw/2,fh/2);sh.closePath();
+ const hole=new THREE.Path();hole.moveTo(-iw/2,-ih/2);hole.lineTo(-iw/2,ih/2);hole.lineTo(iw/2,ih/2);hole.lineTo(iw/2,-ih/2);hole.closePath();sh.holes.push(hole);
+ const frame=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:R*.008,bevelEnabled:true,bevelThickness:R*.003,bevelSize:R*.003,bevelSegments:2}),brass);
+ frame.name='now-playing-frame';frame.rotation.x=Math.PI/2;frame.position.set(0,face-R*.002,cz);g.add(frame);
+ for(const sx of [-1,1])for(const sz of [-1,1]){const s=new THREE.Mesh(new THREE.SphereGeometry(R*.009,12,6,0,Math.PI*2,0,Math.PI/2),brass);s.rotation.x=Math.PI;s.position.set(sx*(fw/2-R*.014),face-R*.012,cz+sz*(fh/2-R*.012));g.add(s);}
+ // two small brass pulls either side
+ for(const sx of [-1,1]){const p=new THREE.Group();p.position.set(sx*R*.43,face,cz);
+  const rose=new THREE.Mesh(new THREE.CylinderGeometry(R*.024,R*.024,R*.008,24),brass);rose.position.y=-R*.004;p.add(rose);
+  const stem=new THREE.Mesh(new THREE.CylinderGeometry(R*.008,R*.008,R*.03,12),brass);stem.position.y=-R*.02;p.add(stem);
+  const knob=new THREE.Mesh(new THREE.SphereGeometry(R*.02,20,12),brass);knob.position.y=-R*.04;knob.scale.set(1,.7,1);p.add(knob);g.add(p);}
+ return g;
+}
+window.addEventListener('vinyl-record',()=>setTimeout(refreshNowPlaying,0));
+window.addEventListener('vinyl-sleeves',()=>refreshNowPlaying());
 /* ---------- Record sleeves: every loaded record not on the platter ---------- */
 const sleeves=new THREE.Group();sleeves.name='sleeves';scene.add(sleeves);
 const dropRing=new THREE.Mesh(new THREE.TorusGeometry(1,.012,8,160),new THREE.MeshBasicMaterial({color:new THREE.Color(1.6,1.15,.55),transparent:true,opacity:0,depthWrite:false,toneMapped:false,blending:THREE.AdditiveBlending}));
@@ -645,7 +781,7 @@ function makeJacket(entry,S,T,empty=false,lazy=false){
  const k=entry.cover+'|'+entry.label+'|'+!!entry.art,cached=coverCache.get(k);
  // Sleeves standing behind others in the crate print their cover only when you reach for them.
  const loadCover=()=>{j.userData.loadCover=null;if(cached==='fail'||!entry.cover||coverCache.get(k)==='loading')return;coverCache.set(k,'loading');
-  new THREE.TextureLoader().load(entry.cover,tex=>{const art=coverArt(tex,entry.label,!!entry.art);coverCache.set(k,art);for(const o of sleeves.children)if(o.userData.coverKey===k)o.userData.applyCover?.(art);},undefined,()=>coverCache.set(k,'fail'));};
+  new THREE.TextureLoader().load(entry.cover,tex=>{const art=coverArt(tex,entry.label,!!entry.art);coverCache.set(k,art);for(const o of [...sleeves.children,...fan.cards])if(o.userData.coverKey===k)o.userData.applyCover?.(art);},undefined,()=>coverCache.set(k,'fail'));};
  j.userData.coverKey=k;j.userData.applyCover=apply;
  if(cached instanceof THREE.Texture)apply(cached);else if(lazy)j.userData.loadCover=loadCover;else loadCover();
  return j;
@@ -733,7 +869,7 @@ function buildSleeves(){
   sleeves.add(crate);
  }
  all.forEach(({e,empty})=>{const i=racked.findIndex(x=>x.e.id===e.id),j=makeJacket(e,S,T,empty,i>0),home=i>=0?sleeveHome(i,n):sleeveRest.get(e.id);j.userData.racked=i>=0;
-  const was=keep.get(e.id);j.position.copy(was?.p??home.p);j.quaternion.copy(was?.q??home.q);j.userData.home=home;j.renderOrder=i>=0?n-i:0;sleeves.add(j);});
+  const was=keep.get(e.id);j.position.copy(was?.p??home.p);j.quaternion.copy(was?.q??home.q);j.userData.home=home;j.renderOrder=i>=0?n-i:0;if(fan.on&&i>=0)j.visible=false;sleeves.add(j);});
  invalidate();
 }
 window.addEventListener('vinyl-sleeves',e=>{sleeveData=(e.detail?.sleeves||[]).slice();currentSleeve=e.detail?.currentSleeve||null;buildSleeves();
@@ -756,6 +892,221 @@ function fileFromLathe(id,from){
  if(bench.blank)bench.blank.visible=false;bench.state='idle';bench.target=0;bench.shown=0;setBlankGroove(0);invalidate(4);
 }
 function clearSleevePop(){if(!sleevePop)return;sleevePop=null;hint('');invalidate(2);}
+/* ---------- hover: a calm title over the sleeve (or key, or fanned record) under the cursor ----------
+   Picking is steadied two ways: a new thing has to stay under the cursor ~100 ms before it takes
+   over (dwell), and the current one is let go only after ~140 ms off it (hysteresis), so sweeping
+   across a row of sleeves doesn't flicker. The label is pinned to the thing's resting top edge,
+   not to its bobbing mesh, so it never jitters; it fades in and out (CSS) and stays inside the window. */
+const hoverEl=typeof document.getElementById==='function'?document.getElementById('hoverTitle'):null;
+const hov={id:null,cand:null,candAt:0,leaveAt:0,last:null,timer:0,x:NaN,y:NaN};
+function hoverCheckLater(ms){clearTimeout(hov.timer);hov.timer=setTimeout(()=>{hov.timer=0;wantHover(hov.last);},Math.max(10,ms));}
+function wantHover(id){
+ const now=performance.now();hov.last=id;
+ if(id===hov.id){hov.cand=null;hov.leaveAt=0;return;}
+ if(id==null){if(!hov.leaveAt)hov.leaveAt=now+140;if(now>=hov.leaveAt){hov.leaveAt=0;hov.cand=null;setHoverNow(null);}else hoverCheckLater(hov.leaveAt-now);return;}
+ if(hov.cand!==id){hov.cand=id;hov.candAt=now+(hov.id?110:90);}
+ if(now>=hov.candAt){hov.cand=null;hov.leaveAt=0;setHoverNow(id);}else hoverCheckLater(hov.candAt-now);
+}
+function setHoverNow(id){
+ hov.id=id;const [kind,key]=id?[id.slice(0,1),id.slice(2)]:[null,null];
+ const was=hoverId;hoverId=kind==='s'?key:null;
+ keyFx.hover=kind==='k'?key:null;
+ if(fan.hover!==(kind==='f'?key:null)){fan.hover=kind==='f'?key:null;layoutFan();}
+ if(kind==='s'){const j=sleeves.children.find(o=>o.userData.sleeveId===key);j?.userData.loadCover?.();}
+ showTitle();if(was!==hoverId)invalidate(2);else invalidate(1);
+}
+function entryOf(id){return (fan.list||[]).find(x=>x.id===id)||sleeveData.find(x=>x.id===id)||(currentSleeve?.id===id?currentSleeve:null);}
+function hoverInfo(){
+ const id=hov.id;if(!id)return null;const kind=id[0],key=id.slice(2);
+ if(kind==='k'){const p=window.vinyl;const label=key==='prev'?'Previous':key==='next'?'Next':(p?.playing?'Pause':'Play');
+  const k=phonograph.getObjectByName('transport-'+key);if(!k)return null;scene.updateMatrixWorld();return {title:label,artist:'',at:k.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,0,R*.075))};}
+ const e=entryOf(key);if(!e)return null;
+ const empty=currentSleeve?.id===key;const title=e.title||e.label||'Record',artist=empty?'playing now':(e.artist||'');
+ if(kind==='f'){const c=fan.cards.find(c=>c.userData.fanId===key);if(!c?.userData.to)return null;const t=c.userData.to;
+  return {title,artist,at:t.center.clone().addScaledVector(t.up,t.half*1.02)};}
+ const j=sleeves.children.find(o=>o.userData.sleeveId===key);if(!j?.userData.home)return null;const S=2*R*1.04,h=j.userData.home;
+ return {title,artist,at:new THREE.Vector3(0,0,S*(j.userData.racked?1.2:1)).applyQuaternion(h.q).add(h.p)};
+}
+function showTitle(){
+ if(!hoverEl)return;const info=hoverInfo();
+ if(!info){hoverEl.classList.remove('on');return;}
+ const b=hoverEl.firstElementChild,s=hoverEl.lastElementChild;
+ if(b.textContent!==info.title)b.textContent=info.title;if(s.textContent!==info.artist)s.textContent=info.artist;
+ hov.at=info.at;placeTitle(true);hoverEl.classList.add('on');
+}
+function placeTitle(force=false){
+ if(!hoverEl||!hov.id||!hov.at)return;const p=toClient(hov.at),w=hoverEl.offsetWidth||120,h=hoverEl.offsetHeight||22;
+ const W=innerWidth,H=innerHeight,x=Math.max(w/2+4,Math.min(W-w/2-4,p.x)),y=Math.max(h+4,Math.min(H-4,p.y-6));
+ if(!force&&Math.abs(x-hov.x)<.5&&Math.abs(y-hov.y)<.5)return;hov.x=x;hov.y=y;
+ hoverEl.style.setProperty('--x',x.toFixed(1)+'px');hoverEl.style.setProperty('--y',y.toFixed(1)+'px');
+}
+
+/* ---------- the fan: double-click the crate and every record fans out ----------
+   The sleeves rise out of the crate and spread into a hand of cards above it (staggered,
+   ~400 ms each), facing you, each with its name on a small tab. Hover lifts one and shows its
+   title; a click plays it now; right-click offers Play next. Double-click the crate again,
+   click empty space or press Esc and they go back. Up to 9 show at once; the wheel turns
+   through the rest. The cards sit on a plane nearer to you than any part of the machine or
+   crate, and fly up out of the crate before coming forward, so they never pass through the
+   cabinet. The window grows while it is open, the same way as for Inspect. */
+const fan={on:false,closing:false,g:null,cards:[],list:[],scroll:0,hover:null,press:null,tags:null,depth:0};
+const FAN_MAX=9,FAN_DUR=400,FAN_STAGGER=45;
+const fanEase=x=>1-Math.pow(1-x,3);
+function crateObject(){return sleeves.getObjectByName('record-crate');}
+function onCrate(e){const c=crateObject();if(!c)return false;setRay(e);return ray.intersectObject(c,true).length>0;}
+function viewBasis(){camera.updateMatrixWorld();const m=camera.matrixWorld;return {right:new THREE.Vector3().setFromMatrixColumn(m,0).normalize(),up:new THREE.Vector3().setFromMatrixColumn(m,1).normalize(),back:new THREE.Vector3().setFromMatrixColumn(m,2).normalize(),pos:camera.getWorldPosition(new THREE.Vector3())};}
+function screenToWorld(x,y,depth){
+ const r=renderer.domElement.getBoundingClientRect(),b=viewBasis();
+ const v=new THREE.Vector3((x-r.left)/r.width*2-1,-(y-r.top)/r.height*2+1,.5).unproject(camera),dir=v.sub(b.pos).normalize();
+ return b.pos.clone().addScaledVector(dir,depth/Math.max(1e-4,-dir.dot(b.back)));
+}
+// The fan's plane: just nearer the eye than the nearest corner of the machine, its toys, the horn and the crate.
+function fanDepth(){
+ const b=viewBasis(),box=new THREE.Box3().setFromObject(phonograph),c=crateObject();if(c)box.union(new THREE.Box3().setFromObject(c));
+ let near=Infinity;for(let i=0;i<8;i++){const p=new THREE.Vector3(i&1?box.max.x:box.min.x,i&2?box.max.y:box.min.y,i&4?box.max.z:box.min.z);near=Math.min(near,-p.sub(b.pos).dot(b.back));}
+ return Math.max(camera.near*4,near*.96);
+}
+function fanTags(){
+ if(fan.tags||typeof document.createElement!=='function')return fan.tags;
+ const d=document.createElement('div');d.id='fanTags';d.setAttribute('aria-hidden','true');document.body.appendChild(d);fan.tags=d;return d;
+}
+function buildFanCards(){
+ const S=2*R*1.04,T=R*.028,list=fan.list.slice(0,40),tags=fanTags();if(tags)tags.textContent='';
+ const crate=crateObject();scene.updateMatrixWorld(true);
+ const deep=crateLocal(0,crateDepth(sleeveData.length+1)*.55,crateFrame().wall*.6),q0=sleeveHome(0,1).q;
+ fan.cards=list.map((e,i)=>{
+  const j=makeJacket({...e,label:e.label||e.title},S,T,false,i>=FAN_MAX);j.userData.pick='fan';j.userData.fanId=e.id;j.userData.pickSleeve=null;
+  const inCrate=sleeves.children.find(o=>o.userData.sleeveId===e.id&&o.userData.racked);
+  const from=inCrate?{p:inCrate.position.clone(),q:inCrate.quaternion.clone(),s:1}:{p:deep.clone(),q:q0.clone(),s:1};
+  j.position.copy(from.p);j.quaternion.copy(from.q);j.userData.from=from;j.userData.order=i;
+  j.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;}});
+  if(tags){const t=document.createElement('div');t.className='fan-tag';t.textContent=e.title||e.label||'Record';tags.appendChild(t);j.userData.tag=t;}
+  fan.g.add(j);return j;});
+ for(const o of sleeves.children)if(o.userData.racked)o.visible=false; // they have risen out of the crate
+}
+function fanSlots(){
+ const n=fan.cards.length,V=Math.min(n,FAN_MAX);fan.scroll=Math.max(0,Math.min(fan.scroll,n-V));
+ const el=renderer.domElement,W=el.clientWidth||innerWidth,H=el.clientHeight||innerHeight;
+ const f=petFrame&&!petFrame.closing&&Math.abs(W-petFrame.w)<3&&Math.abs(H-petFrame.h)<3?petFrame:null;
+ const h0=f?f.h0:H;let card=Math.min(h0*.33,170);
+ const step=V>1?Math.min(11,62/(V-1))*Math.PI/180:0,rad=card*2.3;
+ const cs=toClient(crateCenter()),r=el.getBoundingClientRect();
+ let fx=cs.x-r.left+card*.55,midY=cs.y-r.top-card*.95;
+ const ang=k=>(k-(V-1)/2)*step;
+ // keep the whole hand inside the drawable area, shrinking it if even the grown window is too small
+ for(let pass=0;pass<3;pass++){
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  for(let k=0;k<V;k++){const a=ang(k),cx=fx+rad*Math.sin(a),cy=midY+rad*(1-Math.cos(a)),e=card*.72;x0=Math.min(x0,cx-e);x1=Math.max(x1,cx+e);y0=Math.min(y0,cy-e-card*.14);y1=Math.max(y1,cy+e);}
+  const m=10,wid=x1-x0,hei=y1-y0;
+  if(wid>W-2*m||hei>H-2*m){const k=Math.min((W-2*m)/wid,(H-2*m)/hei);card*=k*.98;continue;}
+  if(x0<m)fx+=m-x0;if(x1>W-m)fx-=x1-(W-m);if(y0<m)midY+=m-y0;if(y1>H-m)midY-=y1-(H-m);break;
+ }
+ return {V,card,rad,fx:fx+r.left,midY:midY+r.top,ang};
+}
+function layoutFan(restart=false){
+ if(!fan.on||!fan.g)return;const L=fanSlots(),b=viewBasis(),S=2*R*1.04,T=R*.028,now=performance.now();
+ const depth=fan.depth||(fan.depth=fanDepth());
+ const ref=screenToWorld(L.fx,L.midY,depth),per=ref.distanceTo(screenToWorld(L.fx,L.midY+1,depth)),s=L.card*per/S,eps=T*s*1.6;
+ fan.cards.forEach((c,i)=>{
+  const k=Math.max(0,Math.min(L.V-1,i-fan.scroll)),shown=i>=fan.scroll&&i<fan.scroll+L.V,a=L.ang(k),hot=shown&&fan.hover===c.userData.fanId;
+  const lift=hot?L.card*.12:0;
+  const cx=L.fx+L.rad*Math.sin(a)+Math.sin(a)*lift,cy=L.midY+L.rad*(1-Math.cos(a))-Math.cos(a)*lift;
+  const up=b.up.clone().multiplyScalar(Math.cos(a)).addScaledVector(b.right,Math.sin(a)),right=b.right.clone().multiplyScalar(Math.cos(a)).addScaledVector(b.up,-Math.sin(a));
+  const center=screenToWorld(cx,cy,depth-(hot?L.V+2:k)*eps),sc=shown?s*(hot?1.06:1):s*.6;
+  const q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right,b.back.clone().negate(),up));
+  const to={p:center.clone().addScaledVector(up,-S*sc/2),q,s:sc,center,up,half:S*sc/2,shown,angle:a};
+  const prev=c.userData.to;c.userData.to=to;
+  if(restart){c.userData.anim={from:c.userData.from,start:now+i*FAN_STAGGER*(shown?1:.3),dur:FAN_DUR,arc:true};}
+  else if(prev&&(prev.center.distanceToSquared(center)>1e-6||Math.abs(prev.s-sc)>1e-5)){c.userData.anim={from:{p:c.position.clone(),q:c.quaternion.clone(),s:c.scale.x},start:now,dur:hot||prev.s>sc?160:260,arc:false};}
+  c.renderOrder=10+(hot?50:k);
+ });
+ if(hov.id&&hov.id[0]==='f')showTitle();
+ invalidate(2);
+}
+// Straight up out of the crate, over the top of the horn, then down into the fan (a cubic whose
+// middle handles sit high above everything), so a card never passes through the machine.
+function fanTop(){if(fan.top==null){const b=new THREE.Box3().setFromObject(phonograph);fan.top=b.max.z;}return fan.top;}
+function arcPoint(a,b,u,out){ // rise, glide across, come down: overlapping eases give rounded corners
+ const Z=Math.max(a.z,b.z,fanTop())+2*R*1.04*.75,up=smooth(0,.42,u),across=smooth(.22,.82,u),down=smooth(.62,1,u);
+ return out.set(a.x+(b.x-a.x)*across,a.y+(b.y-a.y)*across,a.z+(Z-a.z)*up-(Z-b.z)*down);}
+// For tests: sample every card's flight (out and back) and report any overlap with the cabinet, horn or toys.
+function fanPathCheck(steps=48){
+ const solids=['horn','hula-girl','shiba-toy'].map(n=>phonograph.getObjectByName(n)).filter(o=>o&&o.visible).map(o=>new THREE.Box3().setFromObject(o));
+ solids.push(new THREE.Box3(new THREE.Vector3(-cabW-R*.13,-cabD-R*.13,tableZ),new THREE.Vector3(cabW+R*.13,cabD+R*.13,LID_Z+3.4)));
+ const S=2*R*1.04,T=R*.028,hits=[],p=new THREE.Vector3(),q=new THREE.Quaternion();let n=0;
+ for(const c of fan.cards){const to=c.userData.to,from=c.userData.from;if(!to||!from)continue;
+  for(let i=0;i<=steps;i++){const e=fanEase(i/steps),r=smooth(.18,.85,e);arcPoint(from.p,to.p,e,p);q.copy(from.q).slerp(to.q,r);const sc=from.s+(to.s-from.s)*r;
+   const ob=new THREE.Box3(new THREE.Vector3(-S/2,-T/2-1,0),new THREE.Vector3(S/2,T/2+1,S)).applyMatrix4(new THREE.Matrix4().compose(p,q,new THREE.Vector3(sc,sc,sc)));n++;
+   // a sleeve standing in the crate starts beside the cabinet: only flag real overlaps
+   for(const b of solids)if(ob.intersectsBox(b)){const ov=ob.clone().intersect(b),sz=ov.getSize(new THREE.Vector3());if(Math.min(sz.x,sz.y,sz.z)>.5){hits.push({id:c.userData.fanId,u:+(i/steps).toFixed(2)});break;}}}}
+ // and where they rest: every corner of every card nearer the eye than the machine's nearest box corner
+ const b=viewBasis(),depth=v=>-v.clone().sub(b.pos).dot(b.back),box=new THREE.Box3().setFromObject(phonograph);let near=Infinity,far=-Infinity;
+ for(let i=0;i<8;i++)near=Math.min(near,depth(new THREE.Vector3(i&1?box.max.x:box.min.x,i&2?box.max.y:box.min.y,i&4?box.max.z:box.min.z)));
+ for(const c of fan.cards){const to=c.userData.to;if(!to)continue;const ob=new THREE.Box3(new THREE.Vector3(-S/2,-T/2-1,0),new THREE.Vector3(S/2,T/2+1,S)),m=new THREE.Matrix4().compose(to.p,to.q,new THREE.Vector3(to.s,to.s,to.s));
+  for(let i=0;i<8;i++)far=Math.max(far,depth(new THREE.Vector3(i&1?ob.max.x:ob.min.x,i&2?ob.max.y:ob.min.y,i&4?ob.max.z:ob.min.z).applyMatrix4(m)));}
+ return {samples:n,hits:hits.slice(0,12),count:hits.length,restFarthest:+far.toFixed(1),machineNearest:+near.toFixed(1),restClear:far<near};
+}
+function updateFan(){
+ if(!fan.g)return false;const now=performance.now();let busy=false,allBack=true;const tmp=new THREE.Vector3();
+ for(const c of fan.cards){
+  const an=c.userData.anim,to=fan.closing?c.userData.home:c.userData.to;if(!to)continue;
+  let u=1;if(an){u=reduce()?1:Math.max(0,Math.min(1,(now-an.start)/an.dur));if(u<1)busy=true;}
+  const from=an?.from||to,e=fanEase(u);
+  if(an?.arc)arcPoint(from.p,to.p,e,tmp);else tmp.copy(from.p).lerp(to.p,e);
+  const r=an?.arc?smooth(.18,.85,e):e; // on the flight it turns and shrinks only once clear of the crate
+  c.position.copy(tmp);c.quaternion.copy(from.q).slerp(to.q,r);c.scale.setScalar(from.s+(to.s-from.s)*r);
+  c.visible=fan.closing?u<.999:(to.shown||u<1);
+  if(fan.closing&&u<1)allBack=false;
+  if(u>=1&&an)c.userData.anim=null;
+ }
+ placeFanTags();
+ if(fan.closing&&allBack)endFan();
+ if(hov.id&&hov.id[0]==='f')placeTitle();
+ return busy||fan.closing;
+}
+function placeFanTags(){
+ if(!fan.tags)return;const b=viewBasis();
+ for(const c of fan.cards){const t=c.userData.tag;if(!t)continue;const to=c.userData.to;
+  const on=fan.on&&!fan.closing&&to?.shown&&!c.userData.anim&&fan.hover!==c.userData.fanId;
+  t.classList.toggle('on',!!on);if(!on)continue;
+  const S=2*R*1.04,up=new THREE.Vector3(0,0,1).applyQuaternion(c.quaternion),top=c.position.clone().addScaledVector(up,S*c.scale.x*.985),p=toClient(top);
+  const deg=to.angle*180/Math.PI;t.style.transform=`translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) rotate(${deg.toFixed(2)}deg) translate(-50%,-100%)`;}
+}
+async function fanOpen(){
+ if(fan.on||!PET)return false;
+ if(inspect.active)return false;
+ const list=window.vinyl?.allSleeves?.()||[];if(!list.length){window.petShell?.say?.('No other records yet. Drop a song on me.','hint');return false;}
+ clearSleevePop();sleeveDrag=null;setHoverNow(null);
+ fan.on=true;fan.closing=false;fan.list=list;fan.scroll=0;fan.hover=null;fan.depth=0;fan.top=null;
+ fan.g=new THREE.Group();fan.g.name='fan';scene.add(fan.g);buildFanCards();
+ await petRoom(true,'fan');
+ if(!fan.on)return false;
+ await new Promise(r=>{let n=0;const t=setInterval(()=>{const W=renderer.domElement.clientWidth;if(!petFrame||Math.abs(W-petFrame.w)<3||++n>25){clearInterval(t);r();}},20);});
+ fan.depth=0;layoutFan(true);
+ if(list.length>FAN_MAX)window.petShell?.say?.(`Records 1–${FAN_MAX} of ${list.length} · scroll for more`,'hint');
+ invalidate(4);return true;
+}
+function fanClose(now=false){
+ if(!fan.on||fan.closing)return;fan.closing=true;setHoverNow(null);const t=performance.now();
+ const n=fan.cards.length;
+ fan.cards.forEach((c,i)=>{const j=sleeves.children.find(o=>o.userData.sleeveId===c.userData.fanId&&o.userData.racked);
+  const home=j?.userData.home?{p:j.userData.home.p.clone(),q:j.userData.home.q.clone(),s:1}:{...c.userData.from,s:1};
+  c.userData.home=home;c.userData.anim={from:{p:c.position.clone(),q:c.quaternion.clone(),s:c.scale.x},start:t+(now?0:(n-1-i)*FAN_STAGGER*.6),dur:now?1:FAN_DUR*.85,arc:true};});
+ if(fan.tags)for(const el of fan.tags.children)el.classList.remove('on');
+ invalidate(4);
+}
+function endFan(){
+ if(!fan.g)return;
+ for(const o of sleeves.children)if(o.userData.racked)o.visible=true;
+ fan.g.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){for(const m of (Array.isArray(o.material)?o.material:[o.material])){if(m.map&&!m.userData.cached&&!m.map.userData?.shared)m.map.dispose();m.dispose();}}});
+ scene.remove(fan.g);fan.g=null;fan.cards=[];fan.on=false;fan.closing=false;if(fan.tags)fan.tags.textContent='';
+ petRoom(false,'fan');invalidate(3);
+}
+function fanPick(e){if(!fan.on||fan.closing||!fan.g)return null;setRay(e);const hits=ray.intersectObjects(fan.cards.filter(c=>c.visible&&c.userData.to?.shown),true);
+ if(!hits.length)return null;let o=hits[0].object;while(o&&!o.userData.fanId)o=o.parent;return o?{kind:'fan',id:o.userData.fanId,obj:o}:null;}
+function fanScroll(dir){if(!fan.on)return;const n=fan.cards.length;if(n<=FAN_MAX)return;const before=fan.scroll;fan.scroll=Math.max(0,Math.min(n-FAN_MAX,fan.scroll+dir));
+ if(fan.scroll!==before){layoutFan();window.petShell?.say?.(`Records ${fan.scroll+1}–${fan.scroll+FAN_MAX} of ${n}`,'hint');}}
+
 function updateSleeves(dt=1/60){
  const k=reduce()?1:1-Math.pow(.0005,dt);let moving=false;
  for(const j of sleeves.children){if(!j.userData.home)continue;
@@ -805,16 +1156,47 @@ function beginInspection(){
  inspect.qHeld=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),inspect.eye.clone().sub(inspect.held).normalize());
  inspect.qHeld.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),.48));
  controls.enabled=false;
+ if(PET){if(fan.on)fanClose(true);petRoom(true,'inspect');}
  flyTo(inspect.eye,inspect.held,INSPECT_IN,()=>{if(inspect.active&&inspect.phase==='out'){inspect.phase='held';loosenInspectCamera();}});
  setDetail(true);syncInspectUI();invalidate();
 }
 function loosenInspectCamera(){
  controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.minPolarAngle=.02;controls.maxPolarAngle=Math.PI-.02;
  controls.minDistance=R*.65;controls.maxDistance=R*5;controls.enablePan=true;controls.zoomToCursor=true;controls.enabled=true;stopControlMomentum();controls.update();
- if(PET){controls.enableRotate=true;post.setDprCap?.(2);} // inspect is its own mode: turn and zoom the record, at full sharpness
+ if(PET){ // the pet's inspect: the player never turns; drags turn the record in your hands, the wheel only brings it closer
+  controls.enableRotate=false;controls.enablePan=false;controls.zoomToCursor=false;post.setDprCap?.(2);clampInspectZoom(true);}
+}
+/* ---------- the pet's inspect room ----------
+   The pet's window is small, so a record brought close would run into its straight edges. While
+   inspecting, the window grows around the pet (inside its screen) and the camera keeps the same
+   picture in the old rectangle (a view offset), so nothing jumps; the zoom then stops where the
+   whole record still fits inside the grown window with a soft margin. */
+let petFrame=null; // {w0,h0,ox,oy,w,h,closing}
+const roomUsers=new Set(); // 'inspect', 'fan': the window stays grown while either needs it
+async function petRoom(on,who='inspect'){
+ if(!window.desk?.inspectRoom)return;
+ if(on){const had=roomUsers.size>0;roomUsers.add(who);if(had&&petFrame&&!petFrame.closing)return;
+  const plan=await window.desk.inspectRoom('plan');if(!plan||!roomUsers.has(who))return;petFrame={...plan,closing:false};await window.desk.inspectRoom('grow');}
+ else{roomUsers.delete(who);if(!roomUsers.size&&petFrame){petFrame.closing=true;window.desk.inspectRoom('shrink');}}
+}
+// How close the camera may come: the record (a sphere of its radius) stays inside the drawable area.
+function inspectFitDistance(){
+ const c=renderer.domElement,W=c.clientWidth||view.clientWidth,H=c.clientHeight||view.clientHeight;
+ const f=petFrame&&!petFrame.closing&&Math.abs(W-petFrame.w)<3&&Math.abs(H-petFrame.h)<3?petFrame:null;
+ const h0=f?f.h0:H,cx=f?f.ox+f.w0/2:W/2,cy=f?f.oy+f.h0/2:H/2;
+ const margin=Math.max(8,Math.min(W,H)*.04),m=Math.max(20,Math.min(cx,W-cx,cy,H-cy)-margin);
+ const focal=(h0/2)/Math.tan(camera.fov*Math.PI/360),alpha=Math.atan(m/focal);
+ return R*1.02/Math.sin(alpha);
+}
+function clampInspectZoom(pushBack=false){
+ if(!PET||!inspect.active||inspect.phase!=='held')return;
+ const d=inspectFitDistance();controls.minDistance=d;controls.maxDistance=Math.max(d*2.4,R*5);
+ if(pushBack){const off=camera.position.clone().sub(controls.target);if(off.length()<d){camera.position.copy(controls.target).add(off.setLength(d));}controls.update();}
+ invalidate();
 }
 function returnRecord(){
  if(!inspect.active||inspect.phase==='back')return;
+ if(PET){controls.minDistance=R*.65;controls.maxDistance=R*8;}
  inspect.phase='back';inspect.elapsed=0;inspect.drag=null;inspect.from=disc.position.clone();inspect.qFrom=disc.quaternion.clone();controls.enabled=false;
  {const back=inspect.saved||defaultPose();flyTo(back.pos,back.target,INSPECT_OUT);}
  invalidate();
@@ -825,6 +1207,7 @@ function finishInspection(replacing=false){
  if(!replacing)setDetail(false);
  machineClamps();
  if(replacing&&inspect.saved){const s=inspect.saved;flyTo(s.pos,s.target,.7);} // new record mid-inspection: still go back to the viewer's seat
+ if(PET)petRoom(false,'inspect');
  window.vinyl.setInspecting(false);syncInspectUI();invalidate();
 }
 const smooth=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
@@ -862,7 +1245,7 @@ function updateInspection(dt){
  return inspect.phase!=='held';
 }
 inspectButton?.addEventListener('click',()=>inspect.active?returnRecord():beginInspection());
-window.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(inspect.active){e.preventDefault();returnRecord();return;}if(sleevePop||sleeveDrag){e.preventDefault();sleeveDrag=null;clearSleevePop();setCursor('');}});
+window.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(fan.on){e.preventDefault();fanClose();return;}if(inspect.active){e.preventDefault();returnRecord();return;}if(sleevePop||sleeveDrag){e.preventDefault();sleeveDrag=null;clearSleevePop();setCursor('');}});
 
 /* ---------- The bench (one-room mode): lathe, blank stack, post tray ----------
    Sits to the right of the cabinet at platter height. The lathe's blank shows the
@@ -972,9 +1355,9 @@ function buildPhonograph(R){
  for(const sx of [-1,1])for(const sy of [-1,1]){const c=turnedColumn(H,R*.075,dark);c.position.set(sx*(W-R*.045),sy*(D-R*.045),bodyBot);phonograph.add(c);}
  const plinth1=slab(2*W+R*.12,2*D+R*.12,plA,plA*.32,mahogany,5);plinth1.position.z=bodyBot-plA;phonograph.add(plinth1);
  const plinth2=slab(2*W+R*.26,2*D+R*.26,plB,plB*.45,dark,5);plinth2.position.z=bodyBot-plA-plB;phonograph.add(plinth2);
- // a small brass maker's plate on the front panel
- const plate=slab(R*.5,R*.016,R*.12,R*.008,brass,3);plate.rotation.x=Math.PI/2;plate.position.set(0,-D-R*.002,bodyBot+H*.62);phonograph.add(plate);
- const mark=engrave('VINYL SIM',R*.44,R*.09,'#3a2a12',true);if(mark){mark.position.set(0,-D-R*.012,bodyBot+H*.62);phonograph.add(mark);}
+ // a small brass maker's plate on the front panel (the pet has its Now Playing drawer there instead)
+ if(!PET){const plate=slab(R*.5,R*.016,R*.12,R*.008,brass,3);plate.rotation.x=Math.PI/2;plate.position.set(0,-D-R*.002,bodyBot+H*.62);phonograph.add(plate);
+  const mark=engrave('VINYL SIM',R*.44,R*.09,'#3a2a12',true);if(mark){mark.position.set(0,-D-R*.012,bodyBot+H*.62);phonograph.add(mark);}}
  // side crank on the right-hand side, towards the front
  const crank=new THREE.Group();crank.name='crank';crank.position.set(W+R*.02,-D*.38,bodyBot+H*.55);
  const bezel=new THREE.Mesh(new THREE.CylinderGeometry(R*.05,R*.05,R*.02,40),brass);bezel.rotation.z=Math.PI/2;bezel.position.x=R*.01;crank.add(bezel);
@@ -1004,6 +1387,7 @@ function buildPhonograph(R){
  phonograph.traverse(o=>{if(o.isMesh){o.castShadow=!o.material?.transparent;o.receiveShadow=true;}});
  phonograph.add(buildShibaSpot(R,top,W,D)); // after the traverse: the fur shells set their own shadow flags
  {const sw=buildToySwitch(R,W,D,bodyBot,brass);sw.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(sw);}
+ if(PET){const tp=buildTransport(R,W,D,bodyBot,H,brass,bakelite),dr=buildDrawer(R,W,D,bodyBot,brass,mahogany);for(const x of [tp,dr]){x.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(x);}}
  applyToys();
  const shadow=contactDecal(2*W+R*.95,2*D+R*.95,.8);if(shadow){shadow.position.z=tableZ+.4;phonograph.add(shadow);}
  key.target.position.set(0,0,tableZ*.5);dropRing.scale.setScalar(R*1.05);dropRing.position.z=.4;invalidate();
@@ -1152,7 +1536,10 @@ function sleeveInSight(sl){
 }
 let armHold=null;
 function pickAt(e){
- const v=window.vinyl;setRay(e);
+ const v=window.vinyl;
+ if(fan.on){const f=fanPick(e);if(f)return f;}
+ setRay(e);
+ {const t=phonograph.getObjectByName('transport');if(t){const h=ray.intersectObject(t,true)[0];if(h){let o=h.object;while(o&&!o.userData.key)o=o.parent;if(o)return {kind:'transport',key:o.userData.key};}}}
  if(v.record&&tonearm.visible){const a=ray.intersectObjects(armParts,false)[0];if(a)return {kind:'arm'};}
  {const sw=phonograph.getObjectByName('toy-switch');if(sw&&ray.intersectObject(sw,true).length)return {kind:'toy-switch'};}
  const sl=pickIn(sleeves.children.filter(o=>o.userData.pick==='sleeve'));
@@ -1161,16 +1548,23 @@ function pickAt(e){
  return null;
 }
 renderer.domElement.addEventListener('pointerdown',e=>{
- invalidate();if(e.button!==0)return;const v=window.vinyl;
+ invalidate();
+ if(PET&&inspect.active&&e.button!==0){if(inspect.phase==='held'&&e.button===2){inspect.drag={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}return;} // the pet's inspect: a right-drag turns the record too, never the player
+ if(e.button!==0)return;const v=window.vinyl;
  if(inspect.active){
   if(inspect.phase!=='held')return;setRay(e);
   if(ray.intersectObject(disc,true).length){inspect.drag={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}
   else{const p=hitPlane(e,0);if(PET||(p&&Math.hypot(p.x,p.y)<R*1.05))returnRecord();}
   return;
  }
+ if(fan.on){ // the fan is up: a card plays on click; anywhere else puts them back
+  const f=fanPick(e);if(f){fan.press={id:f.id,x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}
+  else if(!fan.closing)fanClose();
+  return;}
  const p0=pickAt(e);
  if(p0){
   renderer.domElement.setPointerCapture?.(e.pointerId);
+  if(p0.kind==='transport'){pressKey(p0.key);return;}
   if(p0.kind==='toy-switch'){swapToy();return;}
   if(p0.kind==='blanks'){window.dispatchEvent?.(new CustomEvent('vinyl-open'));return;}
   if(p0.kind==='post'){window.dispatchEvent?.(new CustomEvent('vinyl-save',{detail:{id:null}}));return;}
@@ -1207,9 +1601,9 @@ function moveSleeve(e){
 }
 renderer.domElement.addEventListener('pointermove',e=>{
  const v=window.vinyl;
- if(!sleeveDrag&&!armHold&&!drag&&!inspect.active&&e.buttons===0){const p=pickAt(e);setCursor(p?'grab':'');
-  const j=p?.kind==='sleeve'&&p.obj.userData.racked?p.obj:null,id=j?j.userData.sleeveId:null;
-  if(id!==hoverId){hoverId=id;if(j){j.userData.loadCover?.();hint(j.userData.empty?`${j.userData.label||'Record'}: its sleeve (playing now)`:`${j.userData.label||'Record'} — click to slide it half out, click again to play it`);}else if(!sleevePop)hint('');invalidate(2);}}
+ if(!sleeveDrag&&!armHold&&!drag&&!inspect.active&&e.buttons===0){const p=pickAt(e);setCursor(p?(p.kind==='transport'||p.kind==='fan'?'pointer':'grab'):'');
+  const id=p?.kind==='sleeve'&&p.obj.userData.racked?'s:'+p.obj.userData.sleeveId:p?.kind==='transport'?'k:'+p.key:p?.kind==='fan'?'f:'+p.id:null;
+  wantHover(id);}
  if(inspect.active){if(inspect.drag&&inspect.phase==='held'){
   const dx=e.clientX-inspect.drag.x,dy=e.clientY-inspect.drag.y;inspect.drag={x:e.clientX,y:e.clientY};
   const right=new THREE.Vector3(1,0,0).transformDirection(camera.matrixWorld),up=new THREE.Vector3(0,1,0).transformDirection(camera.matrixWorld);
@@ -1264,16 +1658,23 @@ function endPointer(e,cancel=false){
   invalidate();return true;}
  return false;
 }
-renderer.domElement.addEventListener('pointerup',e=>{if(e.button!==0)return;if(endPointer(e))return;if(drag){drag=false;window.vinyl.grabEnd();}});
-renderer.domElement.addEventListener('dblclick',e=>{if(e.button!==0)return;setRay(e);const onDisc=!!window.vinyl.record&&ray.intersectObject(disc,true).length>0;
+renderer.domElement.addEventListener('pointerup',e=>{if(inspect.active&&e.button!==0){inspect.drag=null;return;}if(e.button!==0)return;
+ if(fan.press){const f=fan.press;fan.press=null;if(Math.hypot(e.clientX-f.x,e.clientY-f.y)<6&&fan.on&&!fan.closing){fanClose();window.vinyl?.goTo?.(f.id);}return;}if(endPointer(e))return;if(drag){drag=false;window.vinyl.grabEnd();}});
+renderer.domElement.addEventListener('dblclick',e=>{if(e.button!==0)return;
+ if(PET&&!inspect.active&&onCrate(e)&&!fanPick(e)){if(fan.on)fanClose();else fanOpen();return;}
+ if(fan.on)return;setRay(e);const onDisc=!!window.vinyl.record&&ray.intersectObject(disc,true).length>0;
  if(onDisc){if(inspect.active){if(inspect.phase==='held')returnRecord();}else beginInspection();return;}
  });
 renderer.domElement.addEventListener('pointercancel',e=>{if(endPointer(e,true))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 // Narrow (portrait) views widen the lens instead of moving the viewer, so the whole machine stays in frame.
 const BASE_FOV=38,BASE_ASPECT=1.25;
-function resize(){const w=view.clientWidth,h=view.clientHeight;camera.aspect=w/Math.max(1,h);
+function resize(){const w=view.clientWidth,h=view.clientHeight;
+ const f=petFrame&&Math.abs(w-petFrame.w)<3&&Math.abs(h-petFrame.h)<3&&!petFrame.closing?petFrame:null;
+ if(petFrame?.closing&&Math.abs(w-petFrame.w0)<3&&Math.abs(h-petFrame.h0)<3)petFrame=null;
+ camera.aspect=(f?f.w0/f.h0:w/Math.max(1,h));
  camera.fov=camera.aspect>=BASE_ASPECT?BASE_FOV:Math.min(62,2*Math.atan(Math.tan(BASE_FOV*Math.PI/360)*BASE_ASPECT/camera.aspect)*180/Math.PI);
- camera.updateProjectionMatrix();post.resize(w,h);invalidate();} // passes read the updated projection
+ if(f)camera.setViewOffset(f.w0,f.h0,-f.ox,-f.oy,w,h);else camera.clearViewOffset();
+ camera.updateProjectionMatrix();clampInspectZoom(true);post.resize(w,h);if(fan.on&&!fan.closing){fan.depth=0;layoutFan();}if(hov.id)showTitle();invalidate();} // passes read the updated projection
 new ResizeObserver(resize).observe(view);resize();
 function loudness(v,t){
  if(!v.down||v.state.grabbed)return 0;const b=v.buffer||v.grooveBuffer;if(!b)return 0;
@@ -1379,6 +1780,7 @@ function tickScene(dt, nowMs){
  const why=[];
  if(shibaMoving)why.push('shiba');
  if(updateToys(dt))why.push('toy');
+ if(updateKeys(dt))why.push('keys');if(updateFan())why.push('fan');
  grooveSurface();
  if(updateSleeves(dt))why.push('sleeves');if(updateLathe(dt))why.push('lathe');if(updateInspection(dt))why.push('inspect');if(updateSwap(dt))why.push('swap');
  if(updateCamTween(dt)){zoom.goal=null;zoom.vel=0;why.push('flight');}else{const z=applyZoom(dt);if(controls.update()||z)why.push('controls');}
@@ -1392,7 +1794,7 @@ function tickScene(dt, nowMs){
 function drawFrame(nowMs){
  updateShadows(nowMs);
  post.focus?.(inspect.active?camera.position.distanceTo(disc.position):camera.position.distanceTo(focusPoint.set(R*.15,0,4)));
- post.render(nowMs);if(dirty>0)dirty--;
+ post.render(nowMs);if(dirty>0)dirty--;placeTitle();
  if(!firstDrawn){firstDrawn=true;performance.mark?.('vv:first');renderer.domElement.setAttribute?.('data-ready','');
   shiba?.load().then(ok=>{if(ok){renderer.shadowMap.needsUpdate=true;shadowPending=true;performance.mark?.('vv:shiba');}invalidate(3);});}
 }
@@ -1401,7 +1803,7 @@ function frame(){
  rafOn=false;
  if(!PET)requestAnimationFrame(frame);
  const now=performance.now();
- const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy;
+ const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy||(fan.g&&fan.cards.some(c=>c.userData.anim));
  if(PET&&!hands&&dirty<=0&&now-lastDrawAt<31){rafOn=true;requestAnimationFrame(frame);return;} // at most ~30 fps while it only spins (rAF-quantised)
  const raw=Math.max(.001,(now-lastFrame)/1000),dt=Math.min(.25,raw);lastFrame=now;
  const {busy}=tickScene(dt, now);
@@ -1415,12 +1817,19 @@ Object.assign(window.vinylView,{
  get inspect(){return inspect}, get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
  swapToy, get phonograph(){return phonograph},
+ fanOpen, fanClose, fanScroll, fanPathCheck, pressKey, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},
  beginInspection, returnRecord, finishInspection, flyTo, snapToDefault, defaultPose, presentPose,
  keepBelowCeiling, keepInRoom, armSwapFromSleeve, captureExtract, keepDiscAwayFromCamera, roomBounds,
  jacketWorld(id){const j=sleeves.children.find(o=>o.userData.sleeveId===id);if(!j)return null;scene.updateMatrixWorld(true);const peek=j.userData.peekObj;return peek?peek.getWorldPosition(new THREE.Vector3()):jacketCenter(j.userData.home||sleeveHome(0,1));},
  presentFrom(){const p=presentPose();return jacketCenter(p);},
 });
+Object.defineProperties(window.vinylView,{ // live getters (Object.assign would copy their values once)
+ fan:{get(){return {on:fan.on,closing:fan.closing,scroll:fan.scroll,hover:fan.hover,count:fan.cards.length,cards:fan.cards.map(c=>({id:c.userData.fanId,shown:!!c.userData.to?.shown,moving:!!c.userData.anim,...(c.userData.to?toClient(c.userData.to.center):{})}))};}},
+ fanActive:{get(){return fan.on;}},
+ keys:{get(){return {press:{...keyFx.press},glow:{...keyFx.glow},hover:keyFx.hover};}},
+ hover:{get(){return {id:hov.id,shown:!!hoverEl?.classList.contains('on'),x:hov.x,y:hov.y,title:hoverEl?.firstElementChild?.textContent||'',artist:hoverEl?.lastElementChild?.textContent||''};}},
+ nowPlayingKey:{get(){return NOW.key;}}});
 Object.defineProperty(window.vinylView,'R',{get(){return R;}});
 Object.defineProperty(window.vinylView,'shadowRenders',{get(){return shadowRenders;}});
 Object.defineProperty(window.vinylView,'shadowSize',{get(){return key.shadow.mapSize.x;}});

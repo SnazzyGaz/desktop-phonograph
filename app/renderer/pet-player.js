@@ -9,7 +9,7 @@
 'use strict';
 const D=window.desk,Core=window.VinylCore,Tags=window.VinylTags;
 let record=null, ctx=null, buffer=null, reverseBuffer=null, source=null, gain=null, panner=null, down=false;
-let position=0, audioAnchor=0, rpm=45, busy=false, inspecting=false, vol=.8;
+let position=0, audioAnchor=0, rpm=45, busy=false, inspecting=false, vol=.8, muted=false;
 let lastGrabAngle=0, lastGrabTime=0, scratchUsingReverse=false, scratchStart=0, scratchAbsRate=0;
 const SCRATCH_SETTLE_MS=350; let lastScratchMotion=-1e9;
 const state={angle:Math.PI*.2,rotation:0,dragging:false,grabbed:false};
@@ -25,7 +25,7 @@ function time(){
 function silence(){if(source){source.onended=null;try{source.stop();}catch{}source=null;}scratchAbsRate=0;}
 function lift(){position=time();silence();down=false;state.grabbed=false;state.dragging=false;renderStatus();}
 async function ensureAudio(resume=true){if(!ctx){
- ctx=new (window.AudioContext||window.webkitAudioContext)();gain=ctx.createGain();gain.gain.value=vol;
+ ctx=new (window.AudioContext||window.webkitAudioContext)();gain=ctx.createGain();gain.gain.value=muted?0:vol;
  panner=ctx.createPanner();panner.panningModel='HRTF';panner.distanceModel='inverse';panner.rolloffFactor=.5;
  panner.coneInnerAngle=360;panner.coneOuterAngle=360;
  gain.connect(panner);panner.connect(ctx.destination);
@@ -124,6 +124,11 @@ function grabEnd(){
 /* ---------- library ---------- */
 const library=new Map();       // id -> entry
 let currentId=null,useCounter=0,stackOffset=0,autoNext=true,saveT=0;
+/* Next / Previous / Shuffle / Repeat (the order itself is play-order.js). upNext: records asked
+   for with "Play next", ahead of everything else. planned: the record Next would bring, picked
+   once per record so a shuffled pick is the same one that gets fetched ahead of time. */
+const Order=window.PlayOrder;
+let shuffle=false,repeat='off',played=[],history=[],upNext=[],planned=null;
 const STACK=6,TEMP_CAP=10,MAX_MIN=90;
 const newId=()=>'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 function clock(t){t=Math.max(0,t);const m=Math.floor(t/60),s=Math.floor(t-m*60);return m+':'+(s<10?'0':'')+s;}
@@ -140,7 +145,7 @@ function ordered(){ // what comes next in a list stands at the front, then the m
  const cur=library.get(currentId),q=cur?.queue,nextOf=e=>q&&e.queue===q&&e.qIndex>cur.qIndex;
  return [...library.values()].sort((a,b)=>{const na=nextOf(a),nb=nextOf(b);if(na!==nb)return na?-1:1;if(na)return a.qIndex-b.qIndex;return b.used-a.used||b.added-a.added;});
 }
-function sleeveOf(e){return {id:e.id,label:labelOf(e),cover:e.cover||null,art:!!e.cover,facts:factsOf(e)};}
+function sleeveOf(e){return {id:e.id,label:labelOf(e),title:e.state==='fetching'||e.state==='waiting'||e.state==='error'?labelOf(e):(e.title||'Record'),artist:e.artist||'',cover:e.cover||null,art:!!e.cover,facts:factsOf(e)};}
 function sleeveList(){
  const all=ordered().filter(e=>e.id!==currentId);
  stackOffset=Math.max(0,Math.min(stackOffset,Math.max(0,all.length-STACK)));
@@ -157,7 +162,7 @@ function flipStack(dir){const before=stackOffset;stackOffset+=dir>0?1:-1;emitSle
 function add(e){e.id??=newId();e.added??=Date.now();e.used??=++useCounter;library.set(e.id,e);stackOffset=0;emitSleeves();return e;}
 // Temporary records (fetched, not kept): only the newest TEMP_CAP stay; the oldest go, files and all.
 function trimTemp(){
- const cur=library.get(currentId),protect=new Set([currentId,...queueAfter(cur,2).map(x=>x.id)]);
+ const cur=library.get(currentId),protect=new Set([currentId,...queueAfter(cur,2).map(x=>x.id),...upNext,planned].filter(Boolean));
  const have=[...library.values()].filter(e=>e.kind==='link'&&!e.kept&&e.file);
  const victims=have.filter(e=>!protect.has(e.id)&&!fetching.has(e.id)).sort((a,b)=>a.used-b.used);
  for(let i=0;i<have.length-TEMP_CAP&&i<victims.length;i++)forget(victims[i].id,true);
@@ -206,12 +211,26 @@ function recordFor(e,buf){
  const m=Core.parameters(buf.duration);
  return {id:e.id,label:titleOf(e),cover:e.cover||null,tags:{title:e.title,artist:e.artist},metadata:m,playback_source:'playback',base:''};
 }
+function playable(e){return e&&e.state!=='error'&&!(e.missing&&e.kind==='file');}
+function seq(){return Order.baseOrder([...library.values()].filter(e=>playable(e)||e.id===currentId));}
+function orderState(){return {shuffle,repeat,played,history,rng:Math.random};}
+function pickNext(why){
+ upNext=upNext.filter(id=>library.has(id)&&id!==currentId);if(upNext.length)return upNext[0];
+ if(why==='ended'&&repeat==='one')return currentId;
+ if(planned&&library.has(planned)&&planned!==currentId&&playable(library.get(planned)))return planned;
+ planned=Order.next(seq(),currentId,orderState(),why);return planned;
+}
+function noteMounted(id){
+ if(history.at(-1)!==id){history.push(id);if(history.length>60)history.shift();}
+ played=Order.notePlayed({played},id,seq().length);upNext=upNext.filter(x=>x!==id);planned=null;
+}
 function mount(e,buf){
  inspecting=false;silence();down=false;state.grabbed=false;state.dragging=false;scratchAbsRate=0;
  const prev=currentId?library.get(currentId):null;if(prev){prev.used=++useCounter;if(prev.id!==e.id)prev.buffer=null;} // only the record on the turntable keeps its sound in memory
  record=recordFor(e,buf);buffer=buf;reverseBuffer=null;currentId=e.id;e.used=++useCounter;
  position=0;state.rotation=0;rpm=record.metadata.rpm_cut;
  window.dispatchEvent(new CustomEvent('vinyl-record',{detail:record}));
+ noteMounted(e.id);
  emitSleeves();persist();renderStatus();prefetchAfter(e);
 }
 async function play(e,{drop:dropAfter=false}={}){
@@ -301,7 +320,10 @@ function queueAfter(e,n=2){
  if(!e?.queue)return [];
  return [...library.values()].filter(x=>x.queue===e.queue&&x.qIndex>e.qIndex).sort((a,b)=>a.qIndex-b.qIndex).slice(0,n);
 }
-async function prefetchAfter(e){for(const x of queueAfter(e,2)){if(!x.file&&x.state!=='error')await fetchEntry(x);}}
+function aheadOf(e){const out=[],seen=new Set([e?.id]);const n=e?.id===currentId?pickNext('skip'):null;
+ for(const id of [...upNext,n].filter(Boolean)){const x=library.get(id);if(x&&!seen.has(id)){seen.add(id);out.push(x);}}
+ for(const x of queueAfter(e,2))if(!seen.has(x.id)){seen.add(x.id);out.push(x);}return out.slice(0,2);}
+async function prefetchAfter(e){for(const x of aheadOf(e)){if(x.kind==='link'&&!x.file&&x.state!=='error')await fetchEntry(x);}}
 async function keepCurrent(){
  const e=library.get(currentId);if(!e||e.kind!=='link')return;
  e.kept=!e.kept;if(e.file){const f=await D.keep(e.file,e.kept);if(f)e.file=f;}
@@ -311,30 +333,65 @@ async function keepCurrent(){
 let ending=false;
 function finished(ranOut=false){
  if(ending)return;ending=true;setTimeout(()=>ending=false,3000);
- if(!ranOut)lift();const e=library.get(currentId);if(!autoNext||!e)return;
- const next=queueAfter(e,1)[0];if(!next)return;
- say(`Next: “${titleOf(next)}”`,'hint');
- (next.file?Promise.resolve():fetchEntry(next)).then(()=>{if(next.file&&library.has(next.id))setTimeout(()=>play(next,{drop:true}),900);});
+ if(!ranOut)lift();const e=library.get(currentId);if(!e)return;
+ if(repeat==='one'){setTimeout(()=>{if(currentId===e.id&&!down)drop(0).catch(()=>{});},700);return;}
+ if(!autoNext)return;
+ const id=pickNext('ended'),next=id&&library.get(id);if(!next)return;
+ say(`Next: “${titleOf(next)}”`,'hint');goTo(next,{drop:true,delay:900});
 }
+/* ---------- the transport: Play/Pause, Next, Previous (menu, tray, the keys on the cabinet) ---------- */
+// Swap to a record the way a click on its sleeve does: out of its sleeve, onto the platter.
+async function goTo(e,{drop:dropAfter=true,delay=0}={}){
+ if(!e)return false;if(e.state==='error'){say(e.error||'That one couldn’t be played.','error');return false;}
+ if(e.kind==='link'&&!e.file){say(`Getting “${titleOf(e)}” ready…`,'busy');await fetchEntry(e);if(!e.file||!library.has(e.id))return false;}
+ if(delay)await new Promise(r=>setTimeout(r,delay));
+ try{window.vinylView?.armSwapFromSleeve?.(e.id);}catch{}
+ return play(e,{drop:dropAfter});
+}
+function playPause(){
+ if(!record){const id=seq()[0];if(id)return goTo(library.get(id));say('Drop a song on me, or right-click → Play a web link.','hint');return;}
+ if(down&&!state.grabbed){lift();say('Paused','hint');}else drop().catch(()=>{});
+}
+function next(){
+ if(busy)return;const wasPlaying=down&&!state.grabbed||!record;const id=pickNext('skip');
+ if(!id){say(repeat==='off'?'That’s the last record. Turn on Repeat to go round again.':'Nothing else to play yet.','hint');return;}
+ return goTo(library.get(id),{drop:wasPlaying});
+}
+function previous(){
+ if(busy||!record)return;const wasPlaying=down&&!state.grabbed;
+ const a=Order.previousAction(seq(),currentId,time(),orderState());
+ if(a.restart||a.id===currentId){position=0;state.rotation=0;if(wasPlaying)drop(0).catch(()=>{});renderStatus();say('From the start','hint');return;}
+ history=history.slice(0,Math.max(0,history.lastIndexOf(currentId)));planned=null; // going back un-plays this one
+ return goTo(library.get(a.id),{drop:wasPlaying});
+}
+function transport(what){if(what==='toggle')return playPause();if(what==='next')return next();if(what==='prev')return previous();}
+function setShuffle(on){shuffle=!!on;played=currentId?[currentId]:[];planned=null;D.set({shuffle});const e=library.get(currentId);if(e)prefetchAfter(e);}
+function setRepeat(m){repeat=['off','all','one'].includes(m)?m:'off';planned=null;D.set({repeat});}
+function playNext(id){const e=library.get(id);if(!e||id===currentId)return;upNext=[id,...upNext.filter(x=>x!==id)];planned=null;say(`“${titleOf(e)}” plays next`,'hint');if(e.kind==='link'&&!e.file)fetchEntry(e);}
 function speed(value){const wasDown=down&&!state.grabbed;position=time();if(!state.grabbed){silence();down=false;}rpm=Math.max(10,Math.min(100,Number(value)));if(wasDown)drop(position);renderStatus();}
-function setVolume(v){vol=Math.max(0,Math.min(1,Number(v)||0));if(gain)gain.gain.value=vol;D.set({volume:vol});}
+function setVolume(v){vol=Math.max(0,Math.min(1,Number(v)||0));muted=false;if(gain)gain.gain.value=vol;D.set({volume:vol,muted:false});}
+function setMuted(m){muted=!!m;if(gain)gain.gain.value=muted?0:vol;D.set({muted});}
 
 window.vinyl={get record(){return record;},get state(){return state;},get down(){return down;},get buffer(){return buffer;},time,lift,drop,grabStart,grabMove,grabEnd,grabTick,setListener,
  place(x,y,release=false){if(!record)return;if(release){grabEnd();return;}grabStart(x,y);},
  get inspecting(){return inspecting;},setInspecting(value){if(value&&!inspecting)lift();inspecting=!!value;},
- get volume(){return vol;},setVolume,get rpm(){return rpm;},setSpeed(v){if(!record)return;speed(v);},
+ get volume(){return vol;},setVolume,get muted(){return muted;},setMuted,get rpm(){return rpm;},setSpeed(v){if(!record)return;speed(v);},
  get sources(){return {vector:false,png:false,both:false};},get source(){return record?'playback':null;},setSource(){},
  swapTo,sleeves:sleeveList,currentSleeve:()=>{const e=currentId&&library.get(currentId);return e?sleeveOf(e):null;},get currentId(){return currentId;},
  flipStack,forget,say,get busy(){return busy;},get libraryCount(){return library.size;},localApi:async()=>false,isShelved:async()=>true,
  // Desk Phonograph
  openPaths,playLink,keepCurrent,get autoNext(){return autoNext;},set autoNext(v){autoNext=!!v;},
  get entry(){return currentId?library.get(currentId):null;},entries:()=>ordered(),
- get playing(){return down&&!state.grabbed;}
+ get playing(){return down&&!state.grabbed;},
+ transport,playPause,next,previous,goTo:id=>goTo(library.get(id)),playNext,setShuffle,setRepeat,
+ get shuffle(){return shuffle;},get repeat(){return repeat;},get upNext(){return upNext.slice();},get order(){return seq();},get history(){return history.slice();},
+ nextPreview:()=>pickNext('skip'),allSleeves:()=>seq().filter(id=>id!==currentId).map(id=>sleeveOf(library.get(id))),
+ get nowPlaying(){const e=currentId&&library.get(currentId);return e?{title:e.title||titleOf(e),artist:e.artist||''}:null;}
 };
 setInterval(()=>{if(record){if(down&&!state.grabbed&&time()>=duration()-.01)finished();}},150);
 
 (async()=>{
- const st=await D.settings();vol=Number.isFinite(st.volume)?st.volume:.8;autoNext=st.autoNext!==false;
+ const st=await D.settings();vol=Number.isFinite(st.volume)?st.volume:.8;muted=!!st.muted;autoNext=st.autoNext!==false;shuffle=!!st.shuffle;repeat=['off','all','one'].includes(st.repeat)?st.repeat:'off';
  const list=await D.library();
  for(const x of list.sort((a,b)=>a.used-b.used)){
   const e={...x,used:++useCounter,cover:x.cover||null};

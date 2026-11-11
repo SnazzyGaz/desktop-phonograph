@@ -14,8 +14,12 @@ record.
   forwards anywhere in the song.
 - The grooves are drawn from the song's own sound: loud and quiet passages and the
   run-out show on the record. Double-click the record to take a close look at it.
-- The little dancer on the lid moves to the music; the brass button swaps her for a
-  shiba.
+- Three buttons on the front of the cabinet play the previous record, play or pause,
+  and play the next one. The card on the drawer says what's playing.
+- Point at a sleeve in the crate and its name shows above it. Double-click the crate
+  and all the records fan out so you can pick one.
+- The little dancer on the lid moves to the music; the small brass button low on the
+  front swaps her for a shiba.
 
 ## Using it
 
@@ -24,8 +28,12 @@ record.
 | Drag the cabinet | moves it anywhere, onto any screen (give it a throw and it slides) |
 | Scroll | makes it bigger or smaller |
 | Right-click | the menu: play/pause, next, previous, shuffle, repeat, volume, speed, always on top, quit |
-| Double-click the record | look at it closely: drag to turn it, right-drag to look round, scroll to zoom; Esc or click to put it back |
-| Space · ↑ ↓ · [ ] | needle up/down · volume · speed |
+| Click a button on the cabinet | previous · play/pause · next |
+| Click a sleeve, then click it again | slides the record out, then plays it |
+| Right-click a sleeve | *Play this record now* or *Play next* |
+| Double-click the crate | fans all the records out: click one to play it, scroll for more; Esc, a click elsewhere or another double-click puts them back |
+| Double-click the record | look at it closely: drag (or right-drag) to turn it, scroll to bring it closer; Esc or click to put it back |
+| Space · ↑ ↓ · [ ] | play/pause · volume · speed |
 
 The phonograph always faces you in the same three-quarter view.
 

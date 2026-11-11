@@ -40,7 +40,7 @@ function guard(items){
 let clip=clipboard,popupMenu=null,trayMenu=null,popups=0; // menus kept referenced while they are up
 
 /* ---------- settings ---------- */
-const DEFAULTS={bounds:null,onTop:true,autoNext:true,volume:.8,toy:'hula',ytdlpChecked:0};
+const DEFAULTS={bounds:null,onTop:true,autoNext:true,volume:.8,muted:false,shuffle:false,repeat:'off',toy:'hula',ytdlpChecked:0};
 let settings={...DEFAULTS};
 try{settings={...DEFAULTS,...JSON.parse(fs.readFileSync(P.settings,'utf8'))};delete settings.pose;delete settings.pip;}catch{} // old settings: a turned pose (1.0.0), the needle close-up (to 1.0.2)
 let saveT=null;
@@ -96,7 +96,18 @@ ipcMain.on('pet:solid',(e,solid)=>{if(!win)return;const ig=!solid;if(ig!==ignori
 
 /* ---------- moving: Beacons-style drag + fling ---------- */
 let mv=null,fling=null;
-ipcMain.on('pet:move-start',(e,sx,sy)=>{stopFling();mv={sx,sy,x0:bounds.x,y0:bounds.y,trail:[{x:sx,y:sy,t:Date.now()}]};});
+// Inspecting: the window grows round the pet (inside its screen) so a record brought close never meets its edges.
+let room=null;
+ipcMain.handle('pet:inspect-room',(e,step)=>{
+ if(!win||win.isDestroyed())return null;
+ if(step==='plan'){const b=bounds,wa=screen.getDisplayMatching(b).workArea;
+  const x0=Math.max(wa.x,b.x-b.width),y0=Math.max(wa.y,b.y-Math.round(b.height*.9)),x1=Math.min(wa.x+wa.width,b.x+b.width*2),y1=Math.min(wa.y+wa.height,b.y+Math.round(b.height*1.9));
+  room={x:x0,y:y0,width:x1-x0,height:y1-y0};return {w0:b.width,h0:b.height,ox:b.x-x0,oy:b.y-y0,w:room.width,h:room.height};}
+ if(step==='grow'&&room){stopFling();mv=null;win.setBounds(room);log('inspect room',JSON.stringify(room));return true;}
+ if(step==='shrink'){room=null;win.setBounds(bounds);return true;}
+ return null;
+});
+ipcMain.on('pet:move-start',(e,sx,sy)=>{if(room)return;stopFling();mv={sx,sy,x0:bounds.x,y0:bounds.y,trail:[{x:sx,y:sy,t:Date.now()}]};});
 ipcMain.on('pet:move',(e,sx,sy)=>{if(!mv)return;const now=Date.now();mv.trail.push({x:sx,y:sy,t:now});while(mv.trail.length>2&&now-mv.trail[0].t>90)mv.trail.shift();
  place({x:mv.x0+sx-mv.sx,y:mv.y0+sy-mv.sy,width:bounds.width,height:bounds.height},false);});
 ipcMain.on('pet:move-end',()=>{if(!mv)return;const tr=mv.trail;mv=null;
@@ -139,11 +150,22 @@ trayMenu=Menu.buildFromTemplate(guard([
   {label:'Play a song from this computer…',click:()=>{if(!win.isVisible())toggleShown();openFiles();}},
   {label:'Play a web link from the clipboard',click:()=>{if(!win.isVisible())toggleShown();pasteLink();}},
   {type:'separator'},
+  {label:'Play / Pause',click:()=>send('pet:command',{cmd:'transport',what:'toggle'})},
+  {label:'Next record',click:()=>send('pet:command',{cmd:'transport',what:'next'})},
+  {label:'Previous record',click:()=>send('pet:command',{cmd:'transport',what:'prev'})},
+  {label:'Shuffle',type:'checkbox',checked:!!settings.shuffle,click:m=>setShuffle(m.checked)},
+  {label:'Repeat',submenu:repeatItems()},
+  {type:'separator'},
   {label:'Put it back on screen',click:()=>{const wa=screen.getPrimaryDisplay().workArea;place(keepOnScreen({x:wa.x+wa.width-bounds.width-60,y:wa.y+wa.height-bounds.height-30,width:bounds.width,height:bounds.height}));if(!win.isVisible())toggleShown();}},
   {label:'Quit Desk Phonograph',click:quit}]));
  tray.setContextMenu(trayMenu);
 }
 function quit(){quitting=true;app.quit();}
+// Shuffle / Repeat live here (saved) and in the page (what plays next); the tray shows the same ticks.
+function setShuffle(on){settings.shuffle=!!on;saveSettings();send('pet:command',{cmd:'shuffle',on:!!on});buildTray();}
+function setRepeat(mode){settings.repeat=mode;saveSettings();send('pet:command',{cmd:'repeat',mode});buildTray();}
+const REPEATS=[['off','Off'],['all','All records'],['one','This record']];
+function repeatItems(){return REPEATS.map(([k,l])=>({label:l,type:'radio',checked:(settings.repeat||'off')===k,click:()=>setRepeat(k)}));}
 async function openFiles(){
  const r=await dialog.showOpenDialog(win,{title:'Choose songs to play',properties:['openFile','multiSelections'],
   filters:[{name:'Songs',extensions:['mp3','wav','flac','ogg','oga','opus','m4a','aac','wma','webm','mp4']},{name:'Any file',extensions:['*']}]});
@@ -156,11 +178,23 @@ async function pasteLink(){
 ipcMain.handle('pet:menu',(e,st)=>{
  st=st||{};
  const tmpl=[
+  {label:'Play this record now',visible:!!st.sleeve,click:()=>send('pet:command',{cmd:'playNow',id:st.sleeve})},
+  {label:'Play next',visible:!!st.sleeve,click:()=>send('pet:command',{cmd:'playNext',id:st.sleeve})},
+  {type:'separator',visible:!!st.sleeve},
+  {label:st.playing?'Pause':'Play',enabled:!!st.record||!!st.count,click:()=>send('pet:command',{cmd:'transport',what:'toggle'})},
+  {label:'Next record',enabled:!!st.count&&st.hasNext!==false,click:()=>send('pet:command',{cmd:'transport',what:'next'})},
+  {label:'Previous record',enabled:!!st.record,click:()=>send('pet:command',{cmd:'transport',what:'prev'})},
+  {label:'Shuffle',type:'checkbox',checked:!!settings.shuffle,click:m=>setShuffle(m.checked)},
+  {label:'Repeat',submenu:repeatItems()},
+  {label:'Volume',submenu:[
+   {label:'Mute',type:'checkbox',checked:!!st.muted,click:m=>send('pet:command',{cmd:'mute',on:m.checked})},
+   {type:'separator'},
+   ...[25,50,75,100].map(v=>({label:v+'%',type:'radio',checked:!st.muted&&Math.abs(Math.round((st.volume??.8)*100)-v)<=12,click:()=>send('pet:command',{cmd:'volume',value:v/100})}))]},
+  {label:'Spread out the records',enabled:(st.count||0)>1,click:()=>send('pet:command',{cmd:'fan'})},
+  {type:'separator'},
   {label:'Play a song from this computer…',click:openFiles},
   {label:'Play a web link (from the clipboard)',click:()=>pasteLink()},
   {type:'separator'},
-  {label:'Lift the needle',visible:!!st.playing,click:()=>send('pet:command',{cmd:'lift'})},
-  {label:'Put the needle down',visible:!!st.record&&!st.playing,click:()=>send('pet:command',{cmd:'drop'})},
   {label:'Speed',enabled:!!st.record,submenu:[
    {label:'33⅓ rpm',type:'radio',checked:Math.abs((st.rpm||0)-33.333)<.2,click:()=>send('pet:command',{cmd:'speed',rpm:100/3})},
    {label:'45 rpm',type:'radio',checked:Math.abs((st.rpm||0)-45)<.2,click:()=>send('pet:command',{cmd:'speed',rpm:45})},
@@ -169,7 +203,6 @@ ipcMain.handle('pet:menu',(e,st)=>{
    {label:'A little faster',click:()=>send('pet:command',{cmd:'speed',nudge:1})},
    {label:'A little slower',click:()=>send('pet:command',{cmd:'speed',nudge:-1})},
    {label:'Back to normal speed',click:()=>send('pet:command',{cmd:'speed',normal:true})}]},
-  {label:'Volume',submenu:[100,80,60,40,20,0].map(v=>({label:v?v+'%':'Silent',type:'radio',checked:Math.round((st.volume??.8)*100)===v,click:()=>send('pet:command',{cmd:'volume',value:v/100})}))},
   {label:'Look closely at the record',enabled:!!st.record,click:()=>send('pet:command',{cmd:'inspect'})},
   {type:'separator'},
   {label:'Keep this record',type:'checkbox',visible:!!st.canKeep,checked:!!st.kept,click:()=>send('pet:command',{cmd:'keep'})},
@@ -185,7 +218,7 @@ ipcMain.handle('pet:menu',(e,st)=>{
  return true;
 });
 ipcMain.handle('pet:settings',()=>({...settings}));
-ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','toy','autoNext'])if(k in patch)settings[k]=patch[k];saveSettings();}});
+ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','muted','toy','autoNext','shuffle','repeat'])if(k in patch)settings[k]=patch[k];saveSettings();}});
 ipcMain.handle('pet:clipboard',async()=>{try{return String(await readClipboardLink(clip)||'').trim();}catch(e){log('clipboard',e&&e.message);return '';}});
 
 /* ---------- library on disk ---------- */

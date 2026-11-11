@@ -45,7 +45,7 @@ function solidAt(x,y){
  return false;
 }
 function setSolid(s){if(s!==solid){solid=s;D.solid(s);}}
-function test(){hitT=0;if(holding||lastX<0){return;}setSolid(solidAt(lastX,lastY));}
+function test(){hitT=0;if(holding||lastX<0){return;}setSolid(!!V()?.inspect?.active||!!V()?.fanActive||solidAt(lastX,lastY));} // inspecting: the whole (grown) window takes the clicks, so a click beside the record puts it back
 document.addEventListener('mousemove',e=>{lastX=e.clientX;lastY=e.clientY;if(!hitT)hitT=setTimeout(test,30);},{passive:true});
 document.addEventListener('mouseleave',()=>{lastX=-1;if(!holding)setSolid(false);});
 // After the picture changes under a still cursor (it turned, a record arrived) re-test now and then.
@@ -91,8 +91,10 @@ function wheel(e){
 /* ---------- the right-click menu ---------- */
 async function openMenu(e){
  const p=P(),v=V(),pick=e?v?.pickAt(e):null,ent=p?.entry;
- await D.menu({playing:!!p?.playing,record:!!p?.record,rpm:p?.rpm,volume:p?.volume,
-  canKeep:ent?.kind==='link',kept:!!ent?.kept,sleeve:pick?.kind==='sleeve'&&!pick.obj.userData.empty?pick.obj.userData.sleeveId:null});
+ let hasNext=true;try{hasNext=!!p?.nextPreview?.();}catch{}
+ const sleeve=pick?.kind==='sleeve'&&!pick.obj.userData.empty?pick.obj.userData.sleeveId:(pick?.kind==='fan'?pick.id:null);
+ await D.menu({playing:!!p?.playing,record:!!p?.record,rpm:p?.rpm,volume:p?.volume,muted:!!p?.muted,count:p?.libraryCount||0,hasNext,
+  canKeep:ent?.kind==='link',kept:!!ent?.kept,sleeve});
 }
 D.onCommand(async c=>{
  const p=P(),v=V();
@@ -108,6 +110,13 @@ D.onCommand(async c=>{
   case 'forget':p.forget(c.id);break;
   case 'autoNext':p.autoNext=c.on;say(c.on?'The next one will play by itself':'It will stop after each record','hint');break;
   case 'toy':v.swapToy();break;
+  case 'transport':await p.transport(c.what);break;
+  case 'shuffle':p.setShuffle(c.on);say(c.on?'Shuffle on':'Shuffle off','hint');break;
+  case 'repeat':p.setRepeat(c.mode);say({off:'Repeat off',all:'Repeating all the records',one:'Repeating this record'}[c.mode]||'Repeat off','hint');break;
+  case 'mute':p.setMuted(c.on);say(c.on?'Muted':`Volume ${Math.round(p.volume*100)}%`,'hint');break;
+  case 'playNext':p.playNext(c.id);break;
+  case 'playNow':v.fanClose?.(true);await p.goTo(c.id);break;
+  case 'fan':v.fanOpen?.();break;
   case 'say':say(String(c.text||''),c.kind||'info');break;
  }}catch(e){D.log('command',c&&c.cmd,e&&e.stack||String(e));say('That didn’t work just then. Give it another go.','error');}
 });

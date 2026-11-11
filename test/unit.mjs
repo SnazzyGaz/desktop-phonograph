@@ -5,7 +5,7 @@ import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';im
 const require=createRequire(import.meta.url);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
-for(const f of ['app/renderer/static/view.js','app/renderer/static/post.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js','app/clip-link.js'])
+for(const f of ['app/renderer/static/view.js','app/renderer/static/post.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js','app/clip-link.js','app/renderer/play-order.js'])
  {try{const src=fs.readFileSync(path.join(root,f),'utf8');if(/static\/(view|post)\.js$/.test(f)){const tmp=path.join(root,'test','.check-'+path.basename(f,'.js')+'.mjs');fs.writeFileSync(tmp,src);try{execFileSync(process.execPath,['--check',tmp]);}finally{fs.rmSync(tmp);}}else execFileSync(process.execPath,['--check',path.join(root,f)]);ok(true,'parses: '+f);}catch(e){ok(false,'parses: '+f);}}
 const html=fs.readFileSync(path.join(root,'app/renderer/index.html'),'utf8');
 const map=/<script type="importmap">([\s\S]*?)<\/script>/.exec(html)[1],h=crypto.createHash('sha256').update(map).digest('base64');
@@ -55,4 +55,19 @@ const readme=fs.readFileSync(path.join(root,'README.md'),'utf8');ok(!/youtube|ri
  for(const [err,want] of [['ERROR: [generic] x: Unable to download webpage: HTTP Error 404: Not Found',/go anywhere/],['ERROR: Sign in to confirm your age. This video may be inappropriate',/sign in/],['ERROR: Private video. Sign in if you have been granted access',/sign in/],
   ['ERROR: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>',/internet/],['ERROR: Unable to download webpage: HTTP Error 429: Too Many Requests',/busy/],['ERROR: Unsupported URL: https://example.com/',/anything I can play/],['ERROR: [generic] Unable to download webpage: HTTP Error 500',/wouldn.t play/]])
   ok(want.test(friendly(err)),`error words: “${err.slice(7,60)}…” → “${friendly(err)}”`);}
+// Next / Previous / Shuffle / Repeat order (play-order.js)
+{const O=require(path.join(root,'app/renderer/play-order.js'));const seq=['a','b','c','d'];
+ ok(O.baseOrder([{id:'c',added:3},{id:'a',added:1},{id:'q1',added:5,queue:'Q',qIndex:1},{id:'q0',added:9,queue:'Q',qIndex:0},{id:'b',added:2}]).join()==='a,b,c,q0,q1','base order: as added, a list keeps its own order from where it started');
+ ok(O.next(seq,'b',{})==='c'&&O.next(seq,'d',{})===null&&O.next(seq,'d',{repeat:'all'})==='a','in order: Next moves on, stops at the end, Repeat All goes round');
+ ok(O.next(seq,'b',{repeat:'one'},'ended')==='b'&&O.next(seq,'b',{repeat:'one'},'skip')==='c'&&O.next(seq,'d',{repeat:'one'},'skip')==='a','Repeat One: a record that ends plays again; Next still moves on (and comes round)');
+ ok(O.prev(seq,'c',{})==='b'&&O.prev(seq,'a',{})===null&&O.prev(seq,'a',{repeat:'all'})==='d','Previous: the one before, nothing before the first unless repeating');
+ ok(O.previousAction(seq,'c',5,{}).restart===true&&O.previousAction(seq,'c',1.5,{}).id==='b'&&O.previousAction(seq,'a',1,{}).restart===true,'Previous more than 3 s in restarts; early on goes back; at the first record restarts');
+ {let st={shuffle:true,played:['a']},cur='a',got=[cur];const rng=(()=>{let x=7;return ()=>((x=x*1103515245+12345&0x7fffffff)/0x7fffffff);})();
+  for(let i=0;i<3;i++){cur=O.next(seq,cur,{...st,rng});got.push(cur);st.played=O.notePlayed(st,cur,seq.length);}
+  ok(new Set(got).size===4,`shuffle plays every record once before any repeats (${got.join('')})`);
+  ok(O.next(seq,cur,{shuffle:true,played:got,rng})===null,'shuffle, Repeat off: stops when the cycle is done');
+  const again=O.next(seq,cur,{shuffle:true,repeat:'all',played:got,rng});ok(again&&again!==cur,'shuffle, Repeat All: a new cycle, never the same record twice in a row');
+  ok(O.notePlayed({played:['a','b','c']},'d',4).join()==='d','a finished cycle starts the played list again');
+  ok(O.prev(seq,'c',{shuffle:true,history:['a','d','c']})==='d'&&O.prev(seq,'a',{shuffle:true,history:['a']})===null,'shuffle Previous walks back through what actually played');}
+ ok(O.next([],'a',{})===null&&O.next(['a'],'a',{shuffle:true,repeat:'all'})==='a'&&O.next(seq,'zz',{})==='a','edge cases: empty, one record, a record no longer in the list');}
 process.exit(fails?1:0);
