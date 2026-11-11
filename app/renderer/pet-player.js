@@ -57,7 +57,7 @@ async function drop(t=position){
  position=clampTime(t);
  source=ctx.createBufferSource();source.buffer=buffer;source.playbackRate.value=rpm/record.metadata.rpm_cut;source.connect(gain);
  audioAnchor=ctx.currentTime;down=true;source.start(0,position);
- source.onended=()=>{if(state.grabbed)return;position=duration();down=false;source=null;renderStatus();};renderStatus();
+ source.onended=()=>{if(state.grabbed)return;position=duration();down=false;source=null;renderStatus();if(record)finished(true);};renderStatus();
 }
 function scratchVoice(rate){
  if(!record||!buffer||!ctx)return;
@@ -309,9 +309,9 @@ async function keepCurrent(){
 }
 /* when a record finishes: lift, and (playlist, or Auto-play) swap to the next sleeve and drop */
 let ending=false;
-function finished(){
+function finished(ranOut=false){
  if(ending)return;ending=true;setTimeout(()=>ending=false,3000);
- lift();const e=library.get(currentId);if(!autoNext||!e)return;
+ if(!ranOut)lift();const e=library.get(currentId);if(!autoNext||!e)return;
  const next=queueAfter(e,1)[0];if(!next)return;
  say(`Next: “${titleOf(next)}”`,'hint');
  (next.file?Promise.resolve():fetchEntry(next)).then(()=>{if(next.file&&library.has(next.id))setTimeout(()=>play(next,{drop:true}),900);});
