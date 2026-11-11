@@ -23,9 +23,9 @@ function log(...a){try{fs.appendFileSync(P.log,new Date().toISOString()+' '+a.jo
 try{const st=fs.statSync(P.log);if(st.size>2e6)fs.writeFileSync(P.log,'');}catch{}
 
 /* ---------- settings ---------- */
-const DEFAULTS={bounds:null,onTop:true,pip:false,autoNext:true,volume:.8,toy:'hula',pose:null,ytdlpChecked:0};
+const DEFAULTS={bounds:null,onTop:true,pip:false,autoNext:true,volume:.8,toy:'hula',ytdlpChecked:0};
 let settings={...DEFAULTS};
-try{settings={...DEFAULTS,...JSON.parse(fs.readFileSync(P.settings,'utf8'))};}catch{}
+try{settings={...DEFAULTS,...JSON.parse(fs.readFileSync(P.settings,'utf8'))};delete settings.pose;}catch{} // 1.0.0 kept a turned pose; the pose is fixed now
 let saveT=null;
 function saveSettings(){clearTimeout(saveT);saveT=setTimeout(()=>{try{fs.writeFileSync(P.settings,JSON.stringify(settings,null,1));}catch(e){log('settings',e.message);}},300);}
 
@@ -159,7 +159,6 @@ ipcMain.handle('pet:menu',(e,st)=>{
   {label:'Play the next one automatically',type:'checkbox',checked:settings.autoNext,click:m=>{settings.autoNext=m.checked;saveSettings();send('pet:command',{cmd:'autoNext',on:m.checked});}},
   {label:'Needle close-up',type:'checkbox',checked:settings.pip,click:m=>{settings.pip=m.checked;saveSettings();send('pet:command',{cmd:'pip',on:m.checked});}},
   {label:'Swap the dancer',click:()=>send('pet:command',{cmd:'toy'})},
-  {label:'Turn it back to the front',click:()=>send('pet:command',{cmd:'resetPose'})},
   {label:'Always on top',type:'checkbox',checked:settings.onTop,click:m=>{settings.onTop=m.checked;saveSettings();win.setAlwaysOnTop(m.checked,'floating');}},
   {type:'separator'},
   {label:'Hide (click the tray icon to bring it back)',click:toggleShown},
@@ -168,7 +167,7 @@ ipcMain.handle('pet:menu',(e,st)=>{
  return true;
 });
 ipcMain.handle('pet:settings',()=>({...settings}));
-ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','toy','pose','pip','autoNext'])if(k in patch)settings[k]=patch[k];saveSettings();}});
+ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','toy','pip','autoNext'])if(k in patch)settings[k]=patch[k];saveSettings();}});
 ipcMain.handle('pet:clipboard',()=>(clipboard.readText()||'').trim());
 
 /* ---------- library on disk ---------- */

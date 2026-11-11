@@ -3,8 +3,8 @@
    square, the way the Beacons' HitPad grows the silhouette) and tells the main process
    whether that spot is solid; empty pixels let the click fall through to the desktop.
    Gestures: left-drag on the body/base moves the window (arm, record, sleeves, toy keep
-   their own clicks first), right-drag or Alt+left-drag turns it in place, scroll resizes,
-   right-click without a drag opens the menu, double-click resets the pose. */
+   their own clicks first), scroll resizes, right-click opens the menu. The machine stays in
+   one fixed three-quarter pose; only Inspect (double-click the record) turns and zooms. */
 (() => {
 'use strict';
 const D=window.desk,V=()=>window.vinylView,P=()=>window.vinyl;
@@ -63,34 +63,21 @@ window.addEventListener('pointermove',e=>{
  D.move(e.screenX,e.screenY);
 });
 function endMove(){if(!mv)return;const live=mv.live;mv=null;holding=false;document.body.classList.remove('moving');if(live)D.moveEnd();hitDirty=true;setTimeout(test,60);}
-window.addEventListener('pointerup',e=>{if(mv&&e.pointerId===mv.id)endMove();if(orbiting&&e.button===0)stopOrbit();rightUp(e);});
-window.addEventListener('pointercancel',()=>{endMove();stopOrbit();});
+window.addEventListener('pointerup',e=>{if(mv&&e.pointerId===mv.id)endMove();rightUp(e);});
+window.addEventListener('pointercancel',()=>{endMove();right=null;});
 window.addEventListener('blur',()=>{endMove();});
 
-/* ---------- turning it in place: right-drag, or Alt + left-drag ---------- */
-let orbiting=false,right=null;
+/* ---------- right-click = the menu (a press that wanders off is not a click) ---------- */
+let right=null;
 const view=$('view');
 view.addEventListener('pointerdown',e=>{
  holding=true;setSolid(true);
- const c=V()?.controls;if(!c)return;
- if(e.button===0&&e.altKey&&!V().inspect.active){orbiting=true;c.mouseButtons.LEFT=V().THREE.MOUSE.ROTATE;}
- else if(e.button===0)c.mouseButtons.LEFT=null;
  if(e.button===2)right={x:e.clientX,y:e.clientY,moved:false,e};
 },{capture:true});
-function stopOrbit(){if(!orbiting)return;orbiting=false;const c=V()?.controls;if(c)c.mouseButtons.LEFT=null;savePose();}
 window.addEventListener('pointerup',()=>{if(!mv)holding=false;},{capture:false});
-window.addEventListener('pointermove',e=>{if(right&&Math.hypot(e.clientX-right.x,e.clientY-right.y)>5)right.moved=true;});
-function rightUp(e){if(e.button!==2||!right)return;const r=right;right=null;if(r.moved){savePose();return;}openMenu(r.e);}
+window.addEventListener('pointermove',e=>{if(right&&Math.hypot(e.clientX-right.x,e.clientY-right.y)>6)right.moved=true;});
+function rightUp(e){if(e.button!==2||!right)return;const r=right;right=null;if(!r.moved)openMenu(r.e);}
 window.addEventListener('contextmenu',e=>e.preventDefault());
-
-/* the pose is remembered (relative to the record's size) */
-let poseT=0;
-function savePose(){clearTimeout(poseT);poseT=setTimeout(()=>{const v=V();if(!v||v.inspect.active)return;const R=v.R,c=v.camera.position,t=v.controls.target;
- D.set({pose:{p:[c.x/R,c.y/R,c.z/R],t:[t.x/R,t.y/R,t.z/R]}});},400);}
-function restorePose(pose){const v=V();if(!v||!pose?.p)return;const R=v.R,T=v.THREE;
- v.flyTo(new T.Vector3(...pose.p).multiplyScalar(R),new T.Vector3(...pose.t).multiplyScalar(R),.01);}
-function resetPose(){V()?.resetView();D.set({pose:null});}
-view.addEventListener('dblclick',e=>{if(!V()?.pickAt(e))setTimeout(()=>D.set({pose:null}),50);});
 
 /* ---------- scroll = size ---------- */
 let wheelAcc=0,wheelT=0;
@@ -122,7 +109,6 @@ D.onCommand(async c=>{
   case 'autoNext':p.autoNext=c.on;break;
   case 'pip':setPip(c.on);break;
   case 'toy':v.swapToy();break;
-  case 'resetPose':resetPose();break;
  }
 });
 
@@ -148,15 +134,13 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ---------- start-up ---------- */
-let firstRecord=true,savedPose=null;
-window.addEventListener('vinyl-record',()=>{if(firstRecord){firstRecord=false;if(savedPose)setTimeout(()=>restorePose(savedPose),1300);}});
-D.settings().then(st=>{savedPose=st.pose||null;
+D.settings().then(st=>{
  try{localStorage.setItem('vinyl-needle-view',st.pip?'on':'off');}catch{}
  const s=document.createElement('script');s.src='static/needle-pip.js';document.body.appendChild(s);
 });
 const busyState=b=>document.body.classList.toggle('busy',!!b);
 window.petShell={say,progress,wheel,beginMove,drew,busyState,playState(){},hit:solidAt,get solid(){return solid;},
- get orbiting(){return orbiting;},get busy(){return !!mv||orbiting;}};
+ get busy(){return !!mv;}};
 window.addEventListener('error',e=>D.log('error',e.message,e.filename,e.lineno));
 window.addEventListener('unhandledrejection',e=>D.log('rejection',String(e.reason?.message||e.reason)));
 })();

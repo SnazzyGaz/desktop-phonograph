@@ -49,7 +49,7 @@ function machineClamps(){
  controls.enablePan=false;controls.zoomToCursor=false;controls.minPolarAngle=Math.PI*.2;controls.maxPolarAngle=Math.PI*.47;
  const d=defaultPose(),az=azimuthOf(d.pos,d.target);controls.minAzimuthAngle=az-ORBIT_SWING;controls.maxAzimuthAngle=az+ORBIT_SWING;
  controls.minDistance=R*3.5;controls.maxDistance=R*(ROOM?8.5:7.5);
- if(PET){controls.minPolarAngle=Math.PI*.12;controls.maxPolarAngle=Math.PI*.5;const pd=defaultPose(),d=pd.pos.distanceTo(pd.target);controls.minDistance=d*.998;controls.maxDistance=d*1.002;} // a band, not a point: OrbitControls sees a 1-ulp clamp as a zoom every frame
+ if(PET){controls.enableRotate=false;post.setDprCap?.(1.25);controls.minPolarAngle=Math.PI*.12;controls.maxPolarAngle=Math.PI*.5;const pd=defaultPose(),d=pd.pos.distanceTo(pd.target);controls.minDistance=d*.998;controls.maxDistance=d*1.002;} // a band, not a point: OrbitControls sees a 1-ulp clamp as a zoom every frame
 }
 let camTween=null;
 function flyTo(pos,target,dur=.85,done){
@@ -140,7 +140,7 @@ controls.addEventListener('change',()=>invalidate());
 /* ---------- lighting ---------- */
 scene.add(new THREE.HemisphereLight(0xdfe8f5,0x3a2a1e,.18));
 const key=new THREE.DirectionalLight(0xfff0dc,2.7);key.name='window-key';key.position.set(-330,640,560);key.castShadow=true;
-key.shadow.mapSize.set(2048,2048);Object.assign(key.shadow.camera,{left:-340,right:340,top:340,bottom:-340,near:200,far:1900});key.shadow.bias=-.0002;key.shadow.normalBias=.6;key.shadow.radius=3;key.shadow.camera.updateProjectionMatrix();scene.add(key,key.target);
+key.shadow.mapSize.set(PET?1024:2048,PET?1024:2048);Object.assign(key.shadow.camera,{left:-340,right:340,top:340,bottom:-340,near:200,far:1900});key.shadow.bias=-.0002;key.shadow.normalBias=.6;key.shadow.radius=3;key.shadow.camera.updateProjectionMatrix();scene.add(key,key.target);
 // Low raking glance so the groove sheen reads from the default seat.
 // Bounce from the room in front of the machine (fixed, unshadowed).
 const frontFill=new THREE.DirectionalLight(0xffe2c0,.35);frontFill.name='room-bounce';frontFill.position.set(-200,-520,260);scene.add(frontFill);
@@ -811,6 +811,7 @@ function beginInspection(){
 function loosenInspectCamera(){
  controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.minPolarAngle=.02;controls.maxPolarAngle=Math.PI-.02;
  controls.minDistance=R*.65;controls.maxDistance=R*5;controls.enablePan=true;controls.zoomToCursor=true;controls.enabled=true;stopControlMomentum();controls.update();
+ if(PET){controls.enableRotate=true;post.setDprCap?.(2);} // inspect is its own mode: turn and zoom the record, at full sharpness
 }
 function returnRecord(){
  if(!inspect.active||inspect.phase==='back')return;
@@ -1161,7 +1162,6 @@ function pickAt(e){
 }
 renderer.domElement.addEventListener('pointerdown',e=>{
  invalidate();if(e.button!==0)return;const v=window.vinyl;
- if(PET&&window.petShell?.orbiting)return;
  if(inspect.active){
   if(inspect.phase!=='held')return;setRay(e);
   if(ray.intersectObject(disc,true).length){inspect.drag={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}
@@ -1267,7 +1267,7 @@ function endPointer(e,cancel=false){
 renderer.domElement.addEventListener('pointerup',e=>{if(e.button!==0)return;if(endPointer(e))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 renderer.domElement.addEventListener('dblclick',e=>{if(e.button!==0)return;setRay(e);const onDisc=!!window.vinyl.record&&ray.intersectObject(disc,true).length>0;
  if(onDisc){if(inspect.active){if(inspect.phase==='held')returnRecord();}else beginInspection();return;}
- if(PET&&!inspect.active&&!pickAt(e))resetView();});
+ });
 renderer.domElement.addEventListener('pointercancel',e=>{if(endPointer(e,true))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 // Narrow (portrait) views widen the lens instead of moving the viewer, so the whole machine stays in frame.
 const BASE_FOV=38,BASE_ASPECT=1.25;
@@ -1312,10 +1312,12 @@ function shadowSignature(){
  for(const g of outgoing.children)s+=g.position.x*.019+g.position.z*.023;
  return s;
 }
+let shadowRenders=0;
 function updateShadows(now){
  const sig=shadowSignature();
  if(!(Math.abs(sig-shadowSig)<=1e-6))shadowPending=true; // written so the first NaN compare counts as a change: otherwise the shadow map froze after its first render
- if(shadowPending&&now-shadowAt>33){renderer.shadowMap.needsUpdate=true;shadowSig=sig;shadowAt=now;shadowPending=false;}
+ const gap=PET&&!drag&&!armHold&&!sleeveDrag&&!inspect.active&&!dropIn&&!outgoing.children.length?120:33; // the pet: the dancer's shadow need not follow every frame
+ if(shadowPending&&now-shadowAt>gap){renderer.shadowMap.needsUpdate=true;shadowRenders++;shadowSig=sig;shadowAt=now;shadowPending=false;}
  else if(shadowPending)invalidate(1);
 }
 const focusPoint=new THREE.Vector3(); // the near half of the record
@@ -1400,7 +1402,7 @@ function frame(){
  if(!PET)requestAnimationFrame(frame);
  const now=performance.now();
  const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy;
- if(PET&&!hands&&dirty<=0&&now-lastDrawAt<31){rafOn=true;requestAnimationFrame(frame);return;} // ~30 fps while it only spins
+ if(PET&&!hands&&dirty<=0&&now-lastDrawAt<31){rafOn=true;requestAnimationFrame(frame);return;} // at most ~30 fps while it only spins (rAF-quantised)
  const raw=Math.max(.001,(now-lastFrame)/1000),dt=Math.min(.25,raw);lastFrame=now;
  const {busy}=tickScene(dt, now);
  const draw=busy||dirty>0||drag||armHold||sleeveDrag;
@@ -1420,6 +1422,8 @@ Object.assign(window.vinylView,{
  presentFrom(){const p=presentPose();return jacketCenter(p);},
 });
 Object.defineProperty(window.vinylView,'R',{get(){return R;}});
+Object.defineProperty(window.vinylView,'shadowRenders',{get(){return shadowRenders;}});
+Object.defineProperty(window.vinylView,'shadowSize',{get(){return key.shadow.mapSize.x;}});
 // Compile every shader before the first frame, off the main thread where the GPU
 // driver allows (KHR_parallel_shader_compile), instead of stalling the first draw.
 if(typeof renderer.compileAsync==='function'&&!PET){ // the pet's sleeves arrive during start-up; r169's compileAsync trips on a material disposed mid-compile

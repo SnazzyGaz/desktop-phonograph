@@ -35,6 +35,7 @@ const ClampShader={
 export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onChange}={}){
  const gl=renderer.getContext?.();
  const canFloat=!!(renderer.capabilities?.isWebGL2);
+ let userCap=Infinity;const cap=()=>userCap<Infinity?userCap:dprCap; // a caller's ceiling replaces the tier's own
  let mode='auto',tier='high',composer=null,gtao=null,bloom=null,lens=null,dof=null,focusMM=600,w=1,h=1,dprCap=2,dpr=1;
  try{const saved=localStorage.getItem(storageKey);if(saved&&['auto',...TIERS].includes(saved))mode=saved;}catch{}
  // A weak/mobile GPU starts lower; 'auto' adapts from there.
@@ -45,7 +46,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
   composer?.dispose?.();gtao?.dispose?.();bloom?.dispose?.();dof?.dispose?.();composer=gtao=bloom=lens=dof=null;
   // Start at <=1.5x (MSAA hides the difference); 'auto' climbs to the cap only if frames are quick.
   dprCap=tier==='high'?2:tier==='balanced'?1.5:1.25;
-  dpr=Math.min(devicePixelRatio||1,dprCap,mode==='auto'?1.5:dprCap);renderer.setPixelRatio(dpr);
+  dpr=Math.min(devicePixelRatio||1,cap(),mode==='auto'?1.5:cap());renderer.setPixelRatio(dpr);
   renderer.shadowMap.enabled=true;
   if(tier==='low'||!canFloat){resize(w,h);return;}
   const target=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples:4});
@@ -98,7 +99,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
    if(dpr>1.01){dpr=Math.max(1,dpr-.25);renderer.setPixelRatio(dpr);resize(w,h);}
    else{const i=TIERS.indexOf(tier);if(i>0){tier=TIERS[i-1];build();onChange?.(state());}}
    cool=20;
-  }else if(med<11&&dpr<Math.min(devicePixelRatio||1,dprCap)-.01){dpr=Math.min(dprCap,dpr+.25);renderer.setPixelRatio(dpr);resize(w,h);cool=60;}
+  }else if(med<11&&dpr<Math.min(devicePixelRatio||1,cap())-.01){dpr=Math.min(cap(),dpr+.25);renderer.setPixelRatio(dpr);resize(w,h);cool=60;}
  }
  function render(now=performance.now()){
   if(lens)lens.uniforms.uTime.value=(now%10000)/1000;
@@ -110,9 +111,11 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
   if(!['auto',...TIERS].includes(m))return;mode=m;try{localStorage.setItem(storageKey,m);}catch{}
   tier=m==='auto'?(weak?'balanced':'high'):m;samples=[];build();onChange?.(state());
  }
+ // A caller's ceiling on the pixel ratio (the desk pet: 1.25 normally, full in inspect).
+ function setDprCap(c){userCap=c>0?c:Infinity;const next=Math.min(devicePixelRatio||1,cap());if(Math.abs(next-dpr)>.01){dpr=next;renderer.setPixelRatio(dpr);resize(w,h);}}
  function state(){return {mode,tier,dpr};}
  // Pause adaptation across idle gaps (render-on-demand leaves long pauses).
  function idle(){lastDrawn=0;}
  build();
- return {render,resize,setMode,state,idle,focus,get tier(){return tier;}};
+ return {render,resize,setMode,setDprCap,state,idle,focus,get tier(){return tier;}};
 }

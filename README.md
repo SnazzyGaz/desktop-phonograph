@@ -22,12 +22,12 @@ record.
 | Do this | and |
 |---|---|
 | Drag the cabinet | moves it anywhere, onto any screen (give it a throw and it slides) |
-| Right-drag, or Alt + drag | turns it round |
 | Scroll | makes it bigger or smaller |
 | Right-click | the menu: speed, volume, needle close-up, always on top, quit |
-| Double-click the record | look at it closely (scroll to zoom, Esc or click to put it back) |
-| Double-click the cabinet | turns it back to the front |
+| Double-click the record | look at it closely: drag to turn it, right-drag to look round, scroll to zoom; Esc or click to put it back |
 | Space · ↑ ↓ · [ ] | needle up/down · volume · speed |
+
+The phonograph always faces you in the same three-quarter view.
 
 Empty space around it clicks straight through to whatever is underneath. The tray
 icon hides it and brings it back. It remembers where you left it, its size and your

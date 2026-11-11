@@ -27,6 +27,14 @@ ok(rec.dur>1,`song decoded (${rec.dur.toFixed(1)} s, ${rec.R*2} mm record, "${re
 // transparency + hit test: corners are empty, the middle of the machine is solid
 const hits=await page.evaluate(()=>{const W=innerWidth,H=innerHeight,h=window.petShell.hit;return {corner:h(3,3),corner2:h(W-3,H-3),mid:h(W*.5,H*.62)};});
 ok(!hits.corner&&!hits.corner2,'corners click through');ok(hits.mid,'the machine is solid under the cursor');
+// the pose is locked: no orbiting outside Inspect, sharpness capped, a small shadow map
+const lock=await page.evaluate(()=>{const v=window.vinylView;return {rotate:v.controls.enableRotate,dpr:v.renderer.getPixelRatio(),dev:devicePixelRatio,shadow:v.shadowSize};});
+ok(lock.rotate===false,'the machine cannot be turned (right-drag / Alt+drag do nothing)');
+ok(lock.dpr<=Math.min(lock.dev,1.25)+1e-6,`pixel ratio capped in the normal view (${lock.dpr} of ${lock.dev})`);ok(lock.shadow===1024,`shadow map ${lock.shadow}²`);
+{const c=await page.evaluate(()=>{const v=window.vinylView,p0=v.camera.position.clone(),el=v.renderer.domElement,r=el.getBoundingClientRect();
+ const ev=(t,x,y,b)=>el.dispatchEvent(new PointerEvent(t,{clientX:r.left+x,clientY:r.top+y,button:b,buttons:b===2?2:0,pointerId:1,pointerType:'mouse',bubbles:true}));
+ ev('pointerdown',200,200,2);for(let i=1;i<=10;i++)ev('pointermove',200+i*15,200,2);ev('pointerup',350,200,2);return new Promise(res=>setTimeout(()=>res(v.camera.position.distanceTo(p0)),600));});
+ ok(c<1e-3,`a right-drag leaves the camera where it was (moved ${c.toFixed(4)} mm)`);}
 await page.evaluate(()=>window.vinyl.drop(0));await page.waitForTimeout(1500);
 const t1=await page.evaluate(()=>window.vinyl.time());ok(t1>.8,`playing (t=${t1.toFixed(2)})`);
 await still({path:path.join(out,'pet-playing.png'),omitBackground:true});
@@ -38,16 +46,19 @@ ok(sc.back<sc.t0-.3&&sc.fwd>sc.back+.3,`scratch runs back and forward (${sc.t0.t
 // frame rate while playing and while idle
 const fps=async()=>page.evaluate(()=>new Promise(res=>{let n=0;const c=window.vinylView.renderer.info.render;const f0=c.frame;setTimeout(()=>res(c.frame-f0),2000);}));
 await page.waitForTimeout(3000);const playFrames=await fps();
-await page.evaluate(()=>window.vinyl.lift());await page.waitForTimeout(12000);await page.waitForFunction(()=>!window.vinylView.lastDraw,null,{timeout:60000,polling:200}).catch(()=>console.log('  (scene still settling after 60 s)'));
+await page.evaluate(()=>window.vinyl.lift());await page.waitForTimeout(12000);await page.evaluate(()=>new Promise(res=>{const r=window.vinylView.renderer.info.render,t0=performance.now();let f=r.frame,at=t0; // the toy sways to rest first; slow software GL takes a while
+ const t=setInterval(()=>{const n=performance.now();if(r.frame!==f){f=r.frame;at=n;}if(n-at>1500||n-t0>90000){clearInterval(t);if(n-t0>90000)console.log('  (scene still settling after 90 s)');res();}},100);}));
 const idleFrames=await fps();
 console.log('  idle draw reasons:',await page.evaluate(()=>new Promise(res=>{const seen={};const t=setInterval(()=>{const k=window.vinylView.lastDraw||'-';seen[k]=(seen[k]||0)+1;},50);setTimeout(()=>{clearInterval(t);res(JSON.stringify(seen));},1500);})));
 ok(playFrames<=70,`playing draws ≤ ~30 fps (${playFrames/2} fps)`);ok(idleFrames<=4,`idle draws almost nothing (${idleFrames/2} fps)`);
 // inspect, then put it back
 await page.evaluate(()=>window.vinylView.beginInspection());await page.waitForFunction(()=>window.vinylView.inspect.phase==='held',null,{timeout:30000}).catch(()=>{});await page.waitForTimeout(800);
 ok(await page.evaluate(()=>window.vinylView.inspect.phase==='held'),'inspect lifts the record');
+{const i=await page.evaluate(()=>({rotate:window.vinylView.controls.enableRotate,dpr:window.vinylView.renderer.getPixelRatio(),dev:devicePixelRatio}));ok(i.rotate===true,'inspect can still turn and zoom');ok(Math.abs(i.dpr-Math.min(i.dev,2))<1e-6,`full sharpness in inspect (${i.dpr})`);}
 await still({path:path.join(out,'pet-inspect.png'),omitBackground:true,timeout:120000});
 await page.keyboard.press('Escape');await page.waitForFunction(()=>!window.vinylView.inspect.active,null,{timeout:30000}).catch(()=>{});
 ok(await page.evaluate(()=>!window.vinylView.inspect.active),'Esc puts it back');
+ok(await page.evaluate(()=>window.vinylView.controls.enableRotate===false&&window.vinylView.renderer.getPixelRatio()<=Math.min(devicePixelRatio,1.25)+1e-6),'back to the locked pose and capped sharpness');
 // library persists
 await page.waitForTimeout(800);
 const lib=JSON.parse(fs.readFileSync(path.join(data,'library.json'),'utf8'));ok(lib.length===1&&lib[0].path===song,'library saved to disk');
