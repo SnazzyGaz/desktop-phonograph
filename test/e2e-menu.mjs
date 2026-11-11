@@ -22,7 +22,7 @@ await M(({dialog},f)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths
 const setClip=kind=>M((_,{kind,link})=>{const P=v=>Promise.resolve(v);const c={
  promise:{readText:()=>P(link)},object:{readText:()=>P({})},number:{readText:()=>7},undef:{readText:()=>undefined},throws:{readText:()=>{throw new Error('clipboard busy');}},
  bookmark:{readText:()=>P(''),read:()=>P([{types:['electron application/bookmark'],getType:()=>P({title:'x',url:link})}])}}[kind];global.__deskPhono.setClipboard(c);},{kind,link:LINK||'https://example.test/song'});
-const spyLinks=()=>R(()=>{window.__links=[];const real=window.__realPlayLink||(window.__realPlayLink=window.vinyl.playLink);window.vinyl.playLink=t=>{if(!/^https?:/i.test(String(t)))return real(t);window.__links.push(t);return Promise.resolve();};}); // links are only noted; anything else goes on to the real player, which says what to do
+const spyLinks=()=>R(()=>{window.__links=[];const real=window.__realPlayLink||(window.__realPlayLink=window.vinyl.playLink);window.__other=[];window.vinyl.playLink=t=>{if(!/^https?:/i.test(String(t))){window.__other.push(String(t));return real(t);}window.__links.push(t);return Promise.resolve();};}); // links are only noted; anything else goes on to the real player, which says what to do
 if(!LINK)await spyLinks();
 async function openPopup(at){
  const c=at||await R(()=>window.vinylView.toClient(0,0,0));const n=await M(()=>global.__deskPhono.popups);
@@ -92,9 +92,9 @@ await pick('tray','Show the phonograph');ok(await mainUntil(()=>global.__deskPho
 await pick('tray','Hide the phonograph');ok(await mainUntil(()=>!global.__deskPhono.win.isVisible()),'tray “Hide the phonograph”');
 await pick('tray','Show the phonograph');await mainUntil(()=>global.__deskPhono.win.isVisible());
 await R(()=>{window.__paths=[];const o=window.vinyl.openPaths;window.vinyl.openPaths=p=>{window.__paths.push(...p);return o(p);};});
-await pick('tray','Play a song from this computer…');ok(await until(()=>window.__paths.length>0),'tray “Play a song from this computer…”');
+await pick('tray','Play a song from this computer…');ok(await until(()=>window.__paths.length>0),'tray “Play a song from this computer…”');await wait(3000);
 await setClip('promise');await pick('tray','Play a web link from the clipboard');ok(await until(()=>window.__links.length>0),'tray “Play a web link from the clipboard”');
-await setClip('throws');await pick('tray','Play a web link from the clipboard');await wait(600);{const b=await bubble(),l=await R(()=>window.__links.slice());ok(/Copy a web link first/.test(b),`tray link with a broken clipboard: a hint, no crash (“${b}”, links ${JSON.stringify(l)})`);}
+await setClip('throws');await R(()=>{window.__other=[];});await pick('tray','Play a web link from the clipboard');await wait(600);{const b=await bubble(),l=await R(()=>window.__other.slice());ok(/Copy a web link first/.test(b)&&l.length===1&&l[0]==='',`tray link with a broken clipboard: a hint, no crash (“${b}”, links ${JSON.stringify(l)})`);}
 await M(()=>{const w=global.__deskPhono.win;const b=w.getBounds();w.setBounds({...b,x:-6000,y:-6000});});
 await pick('tray','Put it back on screen');ok(await mainUntil(({screen})=>{const b=global.__deskPhono.win.getBounds(),wa=screen.getPrimaryDisplay().workArea;return b.x>=wa.x-1&&b.y>=wa.y-1&&b.x+b.width<=wa.x+wa.width+1&&b.y+b.height<=wa.y+wa.height+1;}),'tray “Put it back on screen”');
 // a throw inside any click shows in the pet (logged), never as Electron's modal box
