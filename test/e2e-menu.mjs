@@ -47,9 +47,17 @@ async function popupItem(label,at){
  const labels=await labelsOf('popup');if(!labels.includes(label)){ok(false,`“${label}” is in the menu (have: ${labels.join(' | ')})`);await M(()=>global.__deskPhono.popup?.closePopup());return false;}
  const r=await pick('popup',label);if(r!=='ok')ok(false,`picked “${label}” — ${r}`);await wait(700);return r==='ok';
 }
+// right-click a sleeve for one of its own items; the sleeves rebuild after a swap, so look again if it missed
+async function sleeveItem(label){for(let i=0;i<3;i++){await until(()=>!window.vinyl.busy,30000);await wait(1200);
+ const sp=await R(()=>window.vinylView.sleevePoints().filter(p=>!p.empty));if(!sp.length)continue;
+ if(!(await openPopup({x:sp[0].x,y:sp[0].y})))continue;const labels=await labelsOf('popup');
+ if(labels.includes(label)){const r=await pick('popup',label);await wait(700);return r==='ok'?sp[0].id:null;}
+ await M(()=>global.__deskPhono.popup?.closePopup());await wait(600);}
+ ok(false,`“${label}” is in a sleeve’s menu`);return null;}
 const until=async(f,ms=8000)=>{const t0=Date.now();while(Date.now()-t0<ms){if(await R(f))return true;await wait(150);}return false;};
 const mainUntil=async(f,ms=5000)=>{const t0=Date.now();while(Date.now()-t0<ms){if(await M(f))return true;await wait(150);}return false;};
 const st=()=>R(()=>({down:window.vinyl.down,rpm:window.vinyl.rpm,vol:window.vinyl.volume,muted:window.vinyl.muted,insp:window.vinylView.inspect.active,toy:window.vinylView.toy,auto:window.vinyl.autoNext,n:window.vinyl.libraryCount,cur:window.vinyl.currentId,shuffle:window.vinyl.shuffle,repeat:window.vinyl.repeat,fan:window.vinylView.fan.on}));
+const fileUntil=async(f,ms=4000)=>{const t0=Date.now();while(Date.now()-t0<ms){if(f(settingsFile()))return true;await wait(150);}return false;};
 const settingsFile=()=>{try{return JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));}catch{return {};}};
 console.log(NATIVE?'  (popup items picked through UI Automation on the native menu)':'  (items fired through each menu’s own command dispatch)');
 
@@ -62,7 +70,7 @@ for(const [lab,want] of [['Speed>78 rpm',78],['Speed>33⅓ rpm',100/3],['Speed>4
 let r0=(await st()).rpm;await popupItem('Speed>A little faster');ok((await st()).rpm>r0+.5,`“Speed>A little faster” → ${(await st()).rpm.toFixed(1)}`);
 r0=(await st()).rpm;await popupItem('Speed>A little slower');ok((await st()).rpm<r0-.5,`“Speed>A little slower” → ${(await st()).rpm.toFixed(1)}`);
 await popupItem('Speed>78 rpm');await popupItem('Speed>Back to normal speed');ok(Math.abs((await st()).rpm-cut)<.2,`“Speed>Back to normal speed” → ${(await st()).rpm.toFixed(1)}`);
-await popupItem('Volume>25%');ok(Math.abs((await st()).vol-.25)<.01,'“Volume>25%”');await popupItem('Volume>Mute');ok((await st()).muted===true&&settingsFile().muted===true,'“Volume>Mute” mutes (and remembers)');
+await popupItem('Volume>25%');ok(Math.abs((await st()).vol-.25)<.01,'“Volume>25%”');await popupItem('Volume>Mute');ok((await st()).muted===true&&await fileUntil(x=>x.muted===true),'“Volume>Mute” mutes (and remembers)');
 await popupItem('Volume>50%');{const x=await st();ok(Math.abs(x.vol-.5)<.01&&!x.muted,'“Volume>50%” unmutes at 50%');}await popupItem('Volume>100%');await popupItem('Volume>75%');ok(Math.abs((await st()).vol-.75)<.01,'“Volume>75%”, “Volume>100%”');
 await popupItem('Look closely at the record');ok(await until(()=>window.vinylView.inspect.active),'“Look closely at the record” lifts it out');
 await page.keyboard.press('Escape');ok(await until(()=>!window.vinylView.inspect.active),'Esc puts it back');await wait(1200);
@@ -76,18 +84,18 @@ await page.keyboard.press('Escape');ok(await until(()=>!window.vinylView.inspect
  await popupItem('Play');await until(()=>window.vinyl.down);await until(()=>window.vinyl.time()>3.4,20000);
  await popupItem('Previous record');ok(await until(()=>window.vinyl.time()<2.5)&&(await st()).cur===a,'“Previous record” more than 3 s in starts it again');
  await popupItem('Pause');await until(()=>!window.vinyl.down);
- await popupItem('Shuffle');ok((await st()).shuffle===true&&settingsFile().shuffle===true,'“Shuffle” on (and remembered)');
+ await popupItem('Shuffle');ok((await st()).shuffle===true&&await fileUntil(x=>x.shuffle===true),'“Shuffle” on (and remembered)');
  ok((await labelsOf('tray')).includes('Shuffle')&&await M(()=>global.__deskPhono.tray.items.find(i=>i.label==='Shuffle').checked),'…the tray’s Shuffle ticks too');
  {const seen=new Set([(await st()).cur]);for(let i=0;i<3;i++){const c=(await st()).cur;await popupItem('Next record');await until(new Function('return window.vinyl.currentId!=='+JSON.stringify(c)+'&&!window.vinyl.busy'),60000);seen.add((await st()).cur);await wait(1800);}
   ok(seen.size===4,`shuffled Next plays a different record each time (${seen.size} of 4)`);}
  await popupItem('Shuffle');ok((await st()).shuffle===false,'“Shuffle” off');
- for(const [lab,want] of [['Repeat>All records','all'],['Repeat>This record','one'],['Repeat>Off','off']]){await popupItem(lab);ok((await st()).repeat===want&&settingsFile().repeat===want,`“${lab}” → ${want} (remembered)`);}
+ for(const [lab,want] of [['Repeat>All records','all'],['Repeat>This record','one'],['Repeat>Off','off']]){await popupItem(lab);ok((await st()).repeat===want&&await fileUntil(x=>x.repeat===want),`“${lab}” → ${want} (remembered)`);}
  await popupItem('Repeat>This record');const one=(await st()).cur;await R(()=>window.vinyl.drop(window.vinyl.record.metadata.duration_sec-1.2));
  ok(await until(()=>window.vinyl.down&&window.vinyl.time()<3,30000)&&(await st()).cur===one,'Repeat This record: when it ends it plays again');await popupItem('Pause');await popupItem('Repeat>Off');
  const sp=await R(()=>window.vinylView.sleevePoints().filter(p=>!p.empty));
- if(sp.length){const id=sp[0].id;await popupItem('Play next',{x:sp[0].x,y:sp[0].y});ok((await R(()=>window.vinyl.upNext))[0]===id,'sleeve “Play next” puts it first in line');
+ if(sp.length){const id=await sleeveItem('Play next');ok(!!id&&(await R(()=>window.vinyl.upNext))[0]===id,'sleeve “Play next” puts it first in line');
   const c=(await st()).cur;await popupItem('Next record');ok(await until(new Function('return window.vinyl.currentId==='+JSON.stringify(id)+'&&!window.vinyl.busy'),60000),'…and Next brings exactly that one');await wait(2500);
-  const sp2=await R(()=>window.vinylView.sleevePoints().filter(p=>!p.empty));await popupItem('Play this record now',{x:sp2[0].x,y:sp2[0].y});ok(await until(new Function('return window.vinyl.currentId==='+JSON.stringify(sp2[0].id)+'&&!window.vinyl.busy'),60000),'sleeve “Play this record now”');await wait(2500);}
+  const id2=await sleeveItem('Play this record now');ok(!!id2&&await until(new Function('return window.vinyl.currentId==='+JSON.stringify(id2)+'&&!window.vinyl.busy'),60000),'sleeve “Play this record now”');await wait(2500);}
  await popupItem('Spread out the records');ok(await until(()=>window.vinylView.fan.on&&window.vinylView.fan.count>=3,10000),`“Spread out the records” fans them out (${(await R(()=>window.vinylView.fan.count))})`);
  await wait(1500);await page.keyboard.press('Escape');ok(await until(()=>!window.vinylView.fan.on,10000),'Esc tucks them back');await wait(800);
  // the keys on the cabinet: the same actions, clickable, never a window drag
@@ -95,7 +103,10 @@ await page.keyboard.press('Escape');ok(await until(()=>!window.vinylView.inspect
  {const k=await R(()=>window.vinylView.keyPoint('next')),c=(await st()).cur,b0=await M(()=>global.__deskPhono.win.getBounds());await page.mouse.click(k.x,k.y);
   ok(await until(new Function('return window.vinyl.currentId!=='+JSON.stringify(c)),60000),'the Next key on the cabinet plays the next record');
   const b1=await M(()=>global.__deskPhono.win.getBounds());ok(b0.x===b1.x&&b0.y===b1.y,'…and does not move the window');await wait(2500);
-  const t=await R(()=>window.vinylView.keyPoint('toggle'));await page.mouse.click(t.x,t.y);ok(await until(()=>window.vinyl.down),'the Play/Pause key plays');await page.mouse.click(t.x,t.y);ok(await until(()=>!window.vinyl.down),'…and pauses');}
+  await until(()=>!window.vinyl.busy,60000);  const t=await R(()=>window.vinylView.keyPoint('toggle'));const was=await R(()=>window.vinyl.down);
+  await page.mouse.click(t.x,t.y);ok(await until(new Function('return window.vinyl.down==='+!was)),`the Play/Pause key ${was?'pauses':'plays'}`);
+  await wait(600);await page.mouse.click(t.x,t.y);ok(await until(new Function('return window.vinyl.down==='+was)),`…and ${was?'plays':'pauses'} again`);
+  if(await R(()=>window.vinyl.down)){await popupItem('Pause');await until(()=>!window.vinyl.down);}}
  await popupItem('Repeat>Off');
 }
 let s=await st();
@@ -105,7 +116,7 @@ await popupItem('Play the next one automatically');ok((await st()).auto===s.auto
 ok(!(await labelsOf('popup').catch(()=>[])).some(l=>/Needle close-up/.test(l)),'no needle close-up item any more');
 await popupItem('Swap the dancer');ok((await st()).toy!==s.toy,`“Swap the dancer” → ${(await st()).toy}`);
 ok(await mainUntil(()=>global.__deskPhono.win.isAlwaysOnTop(),5000),'it really is on top before the toggle (put back if Windows dropped it)');const top0=true;
-await popupItem('Always on top');ok(await mainUntil(new Function(`return global.__deskPhono.win.isAlwaysOnTop()===${!top0}`),2500)&&/top|cover/.test(await bubble())&&settingsFile().onTop===false,`“Always on top” → ${!top0}, and says so (“${await bubble()}”)`);
+await popupItem('Always on top');ok(await mainUntil(new Function(`return global.__deskPhono.win.isAlwaysOnTop()===${!top0}`),2500)&&await until(()=>/top|cover/.test(document.getElementById('bubbleText').textContent),4000)&&await fileUntil(x=>x.onTop===false),`“Always on top” → ${!top0}, and says so (“${await bubble()}”)`);
 await popupItem('Always on top');ok(await M(()=>global.__deskPhono.win.isAlwaysOnTop())===top0,'…and back');
 for(const kind of ['object','number','undef','throws']){await setClip(kind);await popupItem('Play a web link (from the clipboard)');await wait(400);const b=await bubble();ok(/Copy a web link first/.test(b),`clipboard gives ${kind}: a friendly hint, no crash (“${b.slice(0,48)}…”)`);}
 for(const kind of ['promise','bookmark']){
@@ -131,7 +142,7 @@ await pick('tray','Hide the phonograph');ok(await mainUntil(()=>!global.__deskPh
 await pick('tray','Show the phonograph');await mainUntil(()=>global.__deskPhono.win.isVisible());
 await R(()=>{window.__paths=[];const o=window.vinyl.openPaths;window.vinyl.openPaths=p=>{window.__paths.push(...p);return o(p);};});
 await pick('tray','Play a song from this computer…');ok(await until(()=>window.__paths.length>0),'tray “Play a song from this computer…”');await wait(3000);
-{const c=(await st()).cur;await pick('tray','Next record');ok(await until(new Function('return window.vinyl.currentId!=='+JSON.stringify(c)+'&&!window.vinyl.busy'),60000),'tray “Next record”');await wait(2500);
+{await pick('tray','Repeat>All records');await until(()=>window.vinyl.repeat==='all'&&!window.vinyl.busy,30000);const c=(await st()).cur;await pick('tray','Next record');ok(await until(new Function('return window.vinyl.currentId!=='+JSON.stringify(c)+'&&!window.vinyl.busy'),60000),'tray “Next record”');await wait(2500);
  await pick('tray','Previous record');ok(await until(new Function('return window.vinyl.currentId==='+JSON.stringify(c)+'&&!window.vinyl.busy'),60000),'tray “Previous record”');await wait(2500);
  await pick('tray','Play / Pause');ok(await until(()=>window.vinyl.down),'tray “Play / Pause” plays');await pick('tray','Play / Pause');ok(await until(()=>!window.vinyl.down),'…and pauses');
  await pick('tray','Shuffle');ok(await until(()=>window.vinyl.shuffle===true),'tray “Shuffle”');await pick('tray','Shuffle');await until(()=>window.vinyl.shuffle===false);

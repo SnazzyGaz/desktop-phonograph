@@ -54,7 +54,7 @@ ok(playFrames<=70,`playing draws ≤ ~30 fps (${playFrames/2} fps)`);ok(idleFram
 // inspect, then put it back
 await page.evaluate(()=>window.vinylView.beginInspection());await page.waitForFunction(()=>window.vinylView.inspect.phase==='held',null,{timeout:30000}).catch(()=>{});await page.waitForTimeout(800);
 ok(await page.evaluate(()=>window.vinylView.inspect.phase==='held'),'inspect lifts the record');
-{const i=await page.evaluate(()=>({rotate:window.vinylView.controls.enableRotate,dpr:window.vinylView.renderer.getPixelRatio(),dev:devicePixelRatio}));ok(i.rotate===true,'inspect can still turn and zoom');ok(Math.abs(i.dpr-Math.min(i.dev,2))<1e-6,`full sharpness in inspect (${i.dpr})`);}
+{const i=await page.evaluate(()=>({rotate:window.vinylView.controls.enableRotate,zoom:window.vinylView.controls.enableZoom,dpr:window.vinylView.renderer.getPixelRatio(),dev:devicePixelRatio}));ok(i.rotate===false&&i.zoom!==false,'inspect zooms but the player itself never orbits (right-drag turns the record: test/inspect-zoom.mjs)');ok(Math.abs(i.dpr-Math.min(i.dev,2))<1e-6,`full sharpness in inspect (${i.dpr})`);}
 await still({path:path.join(out,'pet-inspect.png'),omitBackground:true,timeout:120000});
 await page.keyboard.press('Escape');await page.waitForFunction(()=>!window.vinylView.inspect.active,null,{timeout:30000}).catch(()=>{});
 ok(await page.evaluate(()=>!window.vinylView.inspect.active),'Esc puts it back');

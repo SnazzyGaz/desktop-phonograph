@@ -943,13 +943,13 @@ function placeTitle(force=false){
 
 /* ---------- the fan: double-click the crate and every record fans out ----------
    The sleeves rise out of the crate and spread into a hand of cards above it (staggered,
-   ~400 ms each), facing you, each with its name on a small tab. Hover lifts one and shows its
-   title; a click plays it now; right-click offers Play next. Double-click the crate again,
+   ~400 ms each), facing you. Hover lifts one and shows its title (the same calm label as in the crate);
+   a click plays it now; right-click offers Play next. Double-click the crate again,
    click empty space or press Esc and they go back. Up to 9 show at once; the wheel turns
    through the rest. The cards sit on a plane nearer to you than any part of the machine or
    crate, and fly up out of the crate before coming forward, so they never pass through the
    cabinet. The window grows while it is open, the same way as for Inspect. */
-const fan={on:false,closing:false,g:null,cards:[],list:[],scroll:0,hover:null,press:null,tags:null,depth:0};
+const fan={on:false,closing:false,g:null,cards:[],list:[],scroll:0,hover:null,press:null,depth:0};
 const FAN_MAX=9,FAN_DUR=400,FAN_STAGGER=45;
 const fanEase=x=>1-Math.pow(1-x,3);
 function crateObject(){return sleeves.getObjectByName('record-crate');}
@@ -966,12 +966,8 @@ function fanDepth(){
  let near=Infinity;for(let i=0;i<8;i++){const p=new THREE.Vector3(i&1?box.max.x:box.min.x,i&2?box.max.y:box.min.y,i&4?box.max.z:box.min.z);near=Math.min(near,-p.sub(b.pos).dot(b.back));}
  return Math.max(camera.near*4,near*.96);
 }
-function fanTags(){
- if(fan.tags||typeof document.createElement!=='function')return fan.tags;
- const d=document.createElement('div');d.id='fanTags';d.setAttribute('aria-hidden','true');document.body.appendChild(d);fan.tags=d;return d;
-}
 function buildFanCards(){
- const S=2*R*1.04,T=R*.028,list=fan.list.slice(0,40),tags=fanTags();if(tags)tags.textContent='';
+ const S=2*R*1.04,T=R*.028,list=fan.list.slice(0,40);
  const crate=crateObject();scene.updateMatrixWorld(true);
  const deep=crateLocal(0,crateDepth(sleeveData.length+1)*.55,crateFrame().wall*.6),q0=sleeveHome(0,1).q;
  fan.cards=list.map((e,i)=>{
@@ -980,7 +976,6 @@ function buildFanCards(){
   const from=inCrate?{p:inCrate.position.clone(),q:inCrate.quaternion.clone(),s:1}:{p:deep.clone(),q:q0.clone(),s:1};
   j.position.copy(from.p);j.quaternion.copy(from.q);j.userData.from=from;j.userData.order=i;
   j.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;}});
-  if(tags){const t=document.createElement('div');t.className='fan-tag';t.textContent=e.title||e.label||'Record';tags.appendChild(t);j.userData.tag=t;}
   fan.g.add(j);return j;});
  for(const o of sleeves.children)if(o.userData.racked)o.visible=false; // they have risen out of the crate
 }
@@ -1059,18 +1054,9 @@ function updateFan(){
   if(fan.closing&&u<1)allBack=false;
   if(u>=1&&an)c.userData.anim=null;
  }
- placeFanTags();
  if(fan.closing&&allBack)endFan();
  if(hov.id&&hov.id[0]==='f')placeTitle();
  return busy||fan.closing;
-}
-function placeFanTags(){
- if(!fan.tags)return;const b=viewBasis();
- for(const c of fan.cards){const t=c.userData.tag;if(!t)continue;const to=c.userData.to;
-  const on=fan.on&&!fan.closing&&to?.shown&&!c.userData.anim&&fan.hover!==c.userData.fanId;
-  t.classList.toggle('on',!!on);if(!on)continue;
-  const S=2*R*1.04,up=new THREE.Vector3(0,0,1).applyQuaternion(c.quaternion),top=c.position.clone().addScaledVector(up,S*c.scale.x*.985),p=toClient(top);
-  const deg=to.angle*180/Math.PI;t.style.transform=`translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) rotate(${deg.toFixed(2)}deg) translate(-50%,-100%)`;}
 }
 async function fanOpen(){
  if(fan.on||!PET)return false;
@@ -1092,14 +1078,13 @@ function fanClose(now=false){
  fan.cards.forEach((c,i)=>{const j=sleeves.children.find(o=>o.userData.sleeveId===c.userData.fanId&&o.userData.racked);
   const home=j?.userData.home?{p:j.userData.home.p.clone(),q:j.userData.home.q.clone(),s:1}:{...c.userData.from,s:1};
   c.userData.home=home;c.userData.anim={from:{p:c.position.clone(),q:c.quaternion.clone(),s:c.scale.x},start:t+(now?0:(n-1-i)*FAN_STAGGER*.6),dur:now?1:FAN_DUR*.85,arc:true};});
- if(fan.tags)for(const el of fan.tags.children)el.classList.remove('on');
  invalidate(4);
 }
 function endFan(){
  if(!fan.g)return;
  for(const o of sleeves.children)if(o.userData.racked)o.visible=true;
  fan.g.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){for(const m of (Array.isArray(o.material)?o.material:[o.material])){if(m.map&&!m.userData.cached&&!m.map.userData?.shared)m.map.dispose();m.dispose();}}});
- scene.remove(fan.g);fan.g=null;fan.cards=[];fan.on=false;fan.closing=false;if(fan.tags)fan.tags.textContent='';
+ scene.remove(fan.g);fan.g=null;fan.cards=[];fan.on=false;fan.closing=false;
  petRoom(false,'fan');invalidate(3);
 }
 function fanPick(e){if(!fan.on||fan.closing||!fan.g)return null;setRay(e);const hits=ray.intersectObjects(fan.cards.filter(c=>c.visible&&c.userData.to?.shown),true);

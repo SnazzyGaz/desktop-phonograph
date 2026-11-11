@@ -241,6 +241,7 @@ async function play(e,{drop:dropAfter=false}={}){
   say(`Putting on “${titleOf(e)}”…`,'busy');
   const buf=await decodeEntry(e);
   lift();mount(e,buf);say(`“${titleOf(e)}”: lower the arm to play.`,'hint');
+  if(playWhenOn!=null){dropAfter=playWhenOn;playWhenOn=null;}
   if(dropAfter)setTimeout(()=>{if(record&&currentId===e.id&&!down)drop(0).catch(()=>{});},1900);
   return true;
  }catch(err){D.log('play',err?.message);e.buffer=null;say(err?.message||'Sorry, that one wouldn’t play.','error');return false;}
@@ -348,7 +349,9 @@ async function goTo(e,{drop:dropAfter=true,delay=0}={}){
  try{window.vinylView?.armSwapFromSleeve?.(e.id);}catch{}
  return play(e,{drop:dropAfter});
 }
+let playWhenOn=null; // Play/Pause pressed while a record is still being put on: honoured once it is on
 function playPause(){
+ if(busy){playWhenOn=playWhenOn==null?!(down&&!state.grabbed):!playWhenOn;say(playWhenOn?'It will play as soon as it’s on':'It will wait when it’s on','hint');return;}
  if(!record){const id=seq()[0];if(id)return goTo(library.get(id));say('Drop a song on me, or right-click → Play a web link.','hint');return;}
  if(down&&!state.grabbed){lift();say('Paused','hint');}else drop().catch(()=>{});
 }
