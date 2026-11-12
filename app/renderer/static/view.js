@@ -1270,7 +1270,7 @@ function applyStage(s){
  applyStageInner(s);
 }
 function applyStageInner(s){const sized=!stage.ready||s.w!==stage.w||s.h!==stage.h;Object.assign(stage,s,{ready:true});
- const st=document.documentElement.style;
+ const st=document.documentElement.style;document.documentElement.classList.add('staged');
  st.setProperty('--px',stage.ox+'px');st.setProperty('--py',stage.oy+'px');st.setProperty('--pw',stage.w+'px');st.setProperty('--ph',stage.h+'px');
  if(sized){stageLog.push({t:performance.now(),...s});if(stageLog.length>40)stageLog.shift();}
  // a drag only moves the canvas (a compositor move; nothing is redrawn); a new size re-lays it and draws at once
@@ -1839,8 +1839,9 @@ function resize(){const w=view.clientWidth,h=view.clientHeight;if(!w||!h)return;
  // a resized canvas is empty: draw it now, in this task, so the screen never gets the empty one
  if(resizeReady&&firstDrawn&&c.width+'x'+c.height!==before){scene.updateMatrixWorld();drawFrame(performance.now());lastDrawAt=performance.now();resizeDraws++;}
 } // passes read the updated projection
-let resizeDraws=0,resizeReady=false,lastPostW=0,lastPostH=0;
+let placedSaid=false,resizeDraws=0,resizeReady=false,lastPostW=0,lastPostH=0;
 new ResizeObserver(resize).observe(view);resize();
+if(PET&&window.desk?.initialStage)applyStage(window.desk.initialStage);
 if(PET&&window.desk?.onStage){window.desk.onStage(applyStage);window.desk.onStageHold?.(stageHold);window.desk.stageGet?.().then(applyStage);}
 function loudness(v,t){
  if(!v.down||v.state.grabbed)return 0;const b=v.buffer||v.grooveBuffer;if(!b)return 0;
@@ -1965,6 +1966,8 @@ function drawFrameInner(nowMs){
  updateShadows(nowMs);
  post.focus?.(inspect.active?camera.position.distanceTo(disc.position):camera.position.distanceTo(focusPoint.set(R*.15,0,4)));
  post.render(nowMs);if(dirty>0)dirty--;placeTitle();
+ // the first frame with the pet at its place: once it is on screen, the window may be shown
+ if(PET&&!placedSaid&&stage.ready&&!document.documentElement.classList.contains('handoff')){placedSaid=true;requestAnimationFrame(()=>requestAnimationFrame(()=>window.desk?.placed?.()));}
  if(!firstDrawn){firstDrawn=true;performance.mark?.('vv:first');renderer.domElement.setAttribute?.('data-ready','');
   if(PET)window.desk?.handoffReady?.();
   shiba?.load().then(ok=>{if(ok){renderer.shadowMap.needsUpdate=true;shadowPending=true;performance.mark?.('vv:shiba');}invalidate(3);});}

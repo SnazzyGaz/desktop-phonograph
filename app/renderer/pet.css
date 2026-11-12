@@ -24,3 +24,5 @@ body.dropping #view{filter:drop-shadow(0 0 10px rgba(255,214,130,.9))}
 #hoverTitle span{font:500 11px/1.25 var(--text);color:#d9c39a}
 #hoverTitle span:empty{display:none}
 html.handoff body{visibility:hidden}
+/* until the page knows where the pet goes, it draws nothing (never the pet the size of the whole window) */
+html:not(.staged) body[data-mode=pet] #view{visibility:hidden}

@@ -77,7 +77,10 @@ let bounds=null; // the pet's own rect on screen (DIP); what is saved, sized and
    only crossing to another screen moves it. A stage exactly the size of the whole monitor (taskbar
    hidden) is kept 1 px smaller so Windows never takes it for a full-screen app. */
 let stage=null,off={x:0,y:0},stageFixAt=0,awayStrikes=0;const stageStats={setBounds:0,moved:0,resized:0};
-/* Several screens: neighbouring screens at the same display scaling share one stage (the box round
+/* Several screens. Since 1.0.9 each screen has its own stage again and crossing to another screen is
+   a hand-off (see setStage); the shared stage below is off unless settings.sharedStage is true: a
+   window over two screens (3840 px wide on a pair of HD screens) started blank on Gaz's PC in 1.0.8.
+   Shared stage: neighbouring screens at the same display scaling share one stage (the box round
    their work areas), so walking the pet from one to the other never moves the window at all: no
    hand-off, nothing to flash, and the pet is whole while it straddles the join. Screens at different
    scaling can't share a window (Windows gives a window one scale), so crossing to one of those moves
@@ -88,6 +91,7 @@ const touch=(a,b)=>a.x<=b.x+b.width+2&&b.x<=a.x+a.width+2&&a.y<=b.y+b.height+2&&
 function boxOf(rs){const x=Math.min(...rs.map(r=>r.x)),y=Math.min(...rs.map(r=>r.y));return {x,y,width:Math.max(...rs.map(r=>r.x+r.width))-x,height:Math.max(...rs.map(r=>r.y+r.height))-y};}
 function stageGroup(b){
  const c={x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)},d=screen.getDisplayNearestPoint(c);
+ if(!settings.sharedStage)return [d];
  let all=[];try{all=screen.getAllDisplays();}catch{}
  const sf=d.scaleFactor||1,same=all.filter(o=>o.id!==d.id&&(o.scaleFactor||1)===sf);
  const fits=g=>{const bx=boxOf(g.map(o=>o.workArea));return bx.width*sf<=STAGE_MAX_PX&&bx.height*sf<=STAGE_MAX_PX&&bx.width*bx.height<=STAGE_MAX_AREA*d.workArea.width*d.workArea.height;};
@@ -148,11 +152,15 @@ function createWindow(){
  const b=firstBounds();bounds=b;stage=stageFor(b);off={x:b.x-stage.x,y:b.y-stage.y,w:b.width,h:b.height};
  win=new BrowserWindow({...stage,frame:false,transparent:true,backgroundColor:'#00000000',resizable:false,maximizable:false,minimizable:false,fullscreenable:false,
   hasShadow:false,skipTaskbar:true,alwaysOnTop:settings.onTop,show:false,title:'Desk Phonograph',icon:iconPath(),
-  webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:true,spellcheck:false}});
+  webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:true,spellcheck:false,
+   additionalArguments:['--dp-stage='+JSON.stringify(layout())]}}); // the page knows where the pet goes before its first frame
  if(settings.onTop)win.setAlwaysOnTop(true,'floating');
  win.setIgnoreMouseEvents(true,{forward:true}); // until the page has drawn and can hit-test
  win.loadFile(path.join(__dirname,'renderer','index.html'));
- win.once('ready-to-show',()=>{win.showInactive();});
+ // Shown only once the page says the pet is drawn at its place (nothing big, nothing blank, nothing
+ // opaque); a page that never says so is shown anyway after a while (it can still talk in its bubble).
+ shown=false;win.once('ready-to-show',()=>{readyAt=Date.now();clearTimeout(showT);showT=setTimeout(()=>showFirst('late'),SHOW_LATE_MS);});
+ setTimeout(()=>showFirst('very late'),20000); // not even a first paint
  win.on('close',e=>{if(!quitting){e.preventDefault();win.hide();}});
  win.webContents.on('will-navigate',e=>e.preventDefault());
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -160,6 +168,17 @@ function createWindow(){
  screen.on('display-removed',()=>place(clampHome({...bounds})));
  screen.on('display-metrics-changed',()=>place(keepOnScreen({...bounds})));
 }
+let shown=false,showT=null,readyAt=0,showWhy='';const SHOW_LATE_MS=6000,startedAt=Date.now();
+function showFirst(why){
+ if(shown||!win||win.isDestroyed())return;shown=true;showWhy=why;clearTimeout(showT);
+ if(win.isVisible())return; // already shown from the tray meanwhile
+ win.showInactive();if(settings.onTop)win.setAlwaysOnTop(true,'floating');
+ setTimeout(()=>{if(!win||win.isDestroyed())return;const cur=win.getBounds();let n=0;try{n=screen.getAllDisplays().length;}catch{}
+  log('start',why,(Date.now()-startedAt)+'ms','screens',n,'stage',JSON.stringify(stage),'window',JSON.stringify(cur),'pet',JSON.stringify(bounds));
+  place({...bounds},false);},400); // the window read back elsewhere? setStage puts it right (and logs it)
+}
+ipcMain.on('pet:placed',()=>showFirst('drawn'));
+if(process.env.DESK_PHONO_TEST)app.on('browser-window-created',(e,w)=>w.on('show',()=>{global.__shownAt=Date.now();}));
 function iconPath(){return path.join(__dirname,'build',process.platform==='win32'?'icon.ico':'icon.png');}
 function send(ch,...a){if(win&&!win.isDestroyed())win.webContents.send(ch,...a);}
 
@@ -210,7 +229,7 @@ ipcMain.handle('pet:zoom-to',(e,r)=>{
 });
 
 /* ---------- tray + menus ---------- */
-function toggleShown(){if(!win)return;if(win.isVisible())win.hide();else{win.showInactive();if(settings.onTop)win.setAlwaysOnTop(true,'floating');}buildTray();}
+function toggleShown(){if(!win)return;shown=true;clearTimeout(showT);if(win.isVisible())win.hide();else{win.showInactive();if(settings.onTop)win.setAlwaysOnTop(true,'floating');}buildTray();}
 function buildTray(){
  if(!tray){tray=new Tray(nativeImage.createFromPath(path.join(__dirname,'build',process.platform==='win32'?'tray.ico':'tray.png')));tray.setToolTip('Desk Phonograph');tray.on('click',toggleShown);}
 trayMenu=Menu.buildFromTemplate(guard([
@@ -465,10 +484,18 @@ ipcMain.on('pet:log',(e,...a)=>log('page',...a.map(String)));
 
 /* ---------- life cycle ---------- */
 // Tests only (never set in normal use): reach the menus as built, and stand in a fake clipboard.
-if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get pet(){return bounds;},get stage(){return stage;},stageStats,stageFor:b=>stageFor(b||bounds),place:b=>place(b,false)};
+if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get pet(){return bounds;},get stage(){return stage;},get shownAt(){return global.__shownAt||0;},get placedShow(){return shown;},get showWhy(){return showWhy;},stageStats,stageFor:b=>stageFor(b||bounds),setShared(v){settings.sharedStage=!!v;},place:b=>place(b,false)};
+// Tests only: stand in a given set of screens (as screen.getAllDisplays gives them) from the start.
+function fakeScreens(list){
+ const all=()=>list.map(d=>({scaleFactor:1,rotation:0,internal:false,touchSupport:'unknown',...d,size:{width:d.bounds.width,height:d.bounds.height},workAreaSize:{width:d.workArea.width,height:d.workArea.height}}));
+ const near=p=>{const a=all();return a.find(d=>p.x>=d.bounds.x&&p.x<d.bounds.x+d.bounds.width&&p.y>=d.bounds.y&&p.y<d.bounds.y+d.bounds.height)||a.reduce((b,d)=>{const dx=Math.max(d.bounds.x-p.x,0,p.x-d.bounds.x-d.bounds.width),dy=Math.max(d.bounds.y-p.y,0,p.y-d.bounds.y-d.bounds.height),k=dx*dx+dy*dy;return !b||k<b.k?{d,k}:b;},null).d;};
+ screen.getAllDisplays=all;screen.getPrimaryDisplay=()=>all().find(d=>d.primary)||all()[0];screen.getDisplayNearestPoint=near;
+ screen.getDisplayMatching=r=>near({x:r.x+r.width/2,y:r.y+r.height/2});
+}
 app.on('second-instance',()=>{if(win){if(!win.isVisible())toggleShown();}});
 app.whenReady().then(()=>{
  Menu.setApplicationMenu(null);
+ if(process.env.DESK_PHONO_TEST&&process.env.DESK_PHONO_FAKE_SCREENS)fakeScreens(JSON.parse(process.env.DESK_PHONO_FAKE_SCREENS));
  createWindow();buildTray();
  setTimeout(()=>prepareYtdlp().catch(e=>log('prepare',e.message)),8000);
 });

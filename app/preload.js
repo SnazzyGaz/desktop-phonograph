@@ -1,7 +1,9 @@
 'use strict';
 const {contextBridge,ipcRenderer,webUtils}=require('electron');
 const on=(ch,fn)=>{const h=(e,...a)=>fn(...a);ipcRenderer.on(ch,h);return ()=>ipcRenderer.removeListener(ch,h);};
+let initialStage=null;try{const a=(process.argv||[]).find(x=>x.startsWith('--dp-stage='));if(a)initialStage=JSON.parse(a.slice(11));}catch{}
 contextBridge.exposeInMainWorld('desk',{
+ initialStage,placed:()=>ipcRenderer.send('pet:placed'),
  solid:s=>ipcRenderer.send('pet:solid',!!s),
  moveStart:(x,y)=>ipcRenderer.send('pet:move-start',x,y),move:(x,y)=>ipcRenderer.send('pet:move',x,y),moveEnd:()=>ipcRenderer.send('pet:move-end'),
  zoomTo:rect=>ipcRenderer.invoke('pet:zoom-to',rect),
