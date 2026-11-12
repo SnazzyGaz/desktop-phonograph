@@ -149,10 +149,19 @@ function place(b,save=true,opt={}){
  setStage(stageFor(bounds),opt.quiet);
  if(save){settings.bounds={...bounds};saveSettings();}
 }
+/* Windows: the stage is a tool window (WS_EX_TOOLWINDOW). Other Chromium-based apps (Chrome, Edge,
+   Discord, VS Code...) stop drawing when they think another window covers them, and they count any
+   visible window as covering them unless it is click-through, translucent or a tool window. While the
+   pointer is on the pet the stage is not click-through, so a whole-screen stage counted as covering
+   every app below it; clicking the pet (a foreground change) made them re-check then, and they stayed
+   "hidden" after the pointer left (going click-through again is not an event they watch): scrolling
+   one did scroll it, but nothing was drawn until a click on it made them re-check. A tool window never
+   counts, and it also keeps the pet out of Alt+Tab. */
+const STAGE_TYPE=process.platform==='win32'?{type:'toolbar'}:{};
 function createWindow(){
  const b=firstBounds();bounds=b;stage=stageFor(b);off={x:b.x-stage.x,y:b.y-stage.y,w:b.width,h:b.height};
  win=new BrowserWindow({...stage,frame:false,transparent:true,backgroundColor:'#00000000',resizable:false,maximizable:false,minimizable:false,fullscreenable:false,
-  hasShadow:false,skipTaskbar:true,alwaysOnTop:settings.onTop,show:false,title:'Desk Phonograph',icon:iconPath(),
+  hasShadow:false,skipTaskbar:true,alwaysOnTop:settings.onTop,show:false,title:'Desk Phonograph',icon:iconPath(),...STAGE_TYPE,
   webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:true,spellcheck:false,
    additionalArguments:['--dp-stage='+JSON.stringify(layout())]}}); // the page knows where the pet goes before its first frame
  if(settings.onTop)win.setAlwaysOnTop(true,'floating');
@@ -514,7 +523,7 @@ ipcMain.on('pet:log',(e,...a)=>log('page',...a.map(String)));
 
 /* ---------- life cycle ---------- */
 // Tests only (never set in normal use): reach the menus as built, and stand in a fake clipboard.
-if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get pet(){return bounds;},get stage(){return stage;},get shownAt(){return global.__shownAt||0;},get placedShow(){return shown;},get showWhy(){return showWhy;},stageStats,stageFor:b=>stageFor(b||bounds),setShared(v){settings.sharedStage=!!v;},place:b=>place(b,false)};
+if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get ignoring(){return ignoring;},stageType:STAGE_TYPE,get pet(){return bounds;},get stage(){return stage;},get shownAt(){return global.__shownAt||0;},get placedShow(){return shown;},get showWhy(){return showWhy;},stageStats,stageFor:b=>stageFor(b||bounds),setShared(v){settings.sharedStage=!!v;},place:b=>place(b,false)};
 // Tests only: stand in a given set of screens (as screen.getAllDisplays gives them) from the start.
 function fakeScreens(list){
  const all=()=>list.map(d=>({scaleFactor:1,rotation:0,internal:false,touchSupport:'unknown',...d,size:{width:d.bounds.width,height:d.bounds.height},workAreaSize:{width:d.workArea.width,height:d.workArea.height}}));
