@@ -26,32 +26,47 @@ other libraries under their own licences; see the yt-dlp project's
 [THIRD_PARTY_LICENSE.txt](https://github.com/yt-dlp/yt-dlp/blob/master/THIRD_PARTY_LICENSE.txt).
 Desk Phonograph runs it as a separate program.
 
-## FFmpeg (9.0.2)
-The builds bundle an unmodified `ffmpeg.exe` (in `resources\bin`) from the gyan.dev
-"release essentials" build, https://www.gyan.dev/ffmpeg/builds/. FFmpeg is a trademark
-of Fabrice Bellard, originator of the FFmpeg project.
+## FFmpeg (9.0.2, slim LGPL build)
+The builds bundle `ffmpeg.exe` (in `resources\bin`), a slim, audio-focused build of
+FFmpeg made for Desk Phonograph. FFmpeg is a trademark of Fabrice Bellard, originator
+of the FFmpeg project. https://ffmpeg.org/
 
-That build is configured with `--enable-gpl --enable-version3`, so the binary as a whole
-is licensed under the **GNU General Public License version 3**. The full licence text
-ships beside it as `FFMPEG-LICENSE.txt`, and the exact version as `FFMPEG-VERSION.txt`.
-Desk Phonograph runs it as a separate program and does not link to it; the MIT licence
-of Desk Phonograph's own code is unaffected.
+It is configured **without** `--enable-gpl`, `--enable-version3` or `--enable-nonfree`,
+so it is licensed under the **GNU Lesser General Public License version 2.1 or later**.
+The full licence text ships beside it as `FFMPEG-LICENSE.txt`, and the version as
+`FFMPEG-VERSION.txt`. Desk Phonograph runs it as a separate program and does not link
+to it; the MIT licence of Desk Phonograph's own code is unaffected.
 
-**Corresponding source.** Under GPLv3 you are entitled to the source of the FFmpeg
-binary we distribute:
+It contains only what the app needs: demuxers for common audio files and video
+containers (MP4/M4A/MOV, WebM/MKV, FLV, AVI, MPEG-TS/PS, Ogg, ASF/WMA/WMV, MP3, AAC,
+FLAC, WAV, AIFF and more), audio decoders (AAC, MP3, MP2, Opus, Vorbis, FLAC, ALAC, PCM,
+AC-3/E-AC-3, DTS, TrueHD, WMA, APE, WavPack, TTA, AMR, Speex), JPEG/PNG decoding and
+JPEG encoding for embedded cover pictures, WAV output, the muxers yt-dlp uses to tidy up
+what it fetched (MP4/M4A, Matroska/WebM, Ogg, MPEG-TS, ADTS, MP3, FLAC), and HTTPS through
+Windows' own Schannel. It has no video decoders or encoders: the audio is taken out of
+a video file without decoding the picture. The only library built in is zlib (zlib
+licence); it is linked statically with the mingw-w64 runtime and needs only Windows'
+own DLLs.
+
+**Corresponding source.** Under the LGPL you are entitled to the source of the FFmpeg
+binary we distribute, and to rebuild it:
 
 - FFmpeg 9.0.2 source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz. A copy of that
-  exact tarball is also attached to every GitHub release of Desk Phonograph that
-  contains this binary, so it stays available from the same place as the binary.
-- The build's configuration and the external libraries it was built with (x264, x265,
-  libvpx, libaom, LAME, Opus, Vorbis and others, each under its own free licence), with
-  their versions and source links, are listed by the builder at
-  https://www.gyan.dev/ffmpeg/builds/. Running `ffmpeg.exe -version` prints the full
-  configuration line.
+  exact tarball is attached to every release of Desk Phonograph that contains this
+  binary, and to the
+  [`ffmpeg-slim-9.0.2`](https://github.com/SnazzyGaz/desktop-phonograph/releases/tag/ffmpeg-slim-9.0.2)
+  release together with the binary itself, its full configure line
+  (`FFMPEG-CONFIGURE.txt`) and checksums.
+- The exact build recipe is `tools/build-ffmpeg-slim.sh` in this repository
+  (cross-compiled on Debian 13 with mingw-w64 GCC 14 and zlib 1.3.1). Running
+  `ffmpeg.exe -version` prints the full configuration line.
 
 If any of those links stop working, open an issue on this repository and we will
 provide the corresponding source for at least three years from the date of the release
 you downloaded.
+
+Desk Phonograph 1.0.10 and earlier bundled the GPLv3 gyan.dev "essentials" build of
+FFmpeg instead; its source (FFmpeg 9.0.2) is attached to the v1.0.10 release.
 
 ## Fonts
 Jost and Manrope, SIL Open Font License 1.1 (`app/renderer/static/fonts/*-OFL.txt`).

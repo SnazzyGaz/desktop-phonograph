@@ -1,5 +1,5 @@
 # Builds the Windows portable .exe when a version tag (v1.2.3) is pushed, and attaches it
-# (with the FFmpeg source it bundles, for the GPL) to that tag's GitHub release.
+# (with the source of the FFmpeg it bundles, for the LGPL) to that tag's GitHub release.
 name: Release
 
 on:
@@ -21,7 +21,7 @@ jobs:
       - run: npm install
       - run: npm test
       - run: npm run build:portable
-      - name: FFmpeg source for the bundled binary (GPLv3)
+      - name: FFmpeg source for the bundled binary (LGPL)
         shell: bash
         run: |
           v=$(tr -d '\r\n' < vendor-bin/FFMPEG-VERSION.txt)

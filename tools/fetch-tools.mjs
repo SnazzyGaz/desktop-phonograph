@@ -2,7 +2,7 @@
 // the publishers' own checksums. They are not kept in git. Run before building:
 //   npm run fetch-tools
 //  - yt-dlp.exe: latest release from https://github.com/yt-dlp/yt-dlp (SHA2-256SUMS)
-//  - ffmpeg.exe: gyan.dev "release essentials" build (https://www.gyan.dev/ffmpeg/builds/, .sha256)
+//  - ffmpeg.exe: our slim audio-focused LGPL build (tools/build-ffmpeg-slim.sh), from this repo's releases
 import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import crypto from 'crypto';import os from 'os';import {execFileSync} from 'child_process';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),out=path.join(root,'vendor-bin');
 fs.mkdirSync(out,{recursive:true});
@@ -18,18 +18,16 @@ if(force||!fs.existsSync(yt)){
  if(sha(exe)!==want)throw Error('yt-dlp.exe checksum mismatch');fs.writeFileSync(yt,exe);console.log('yt-dlp.exe ok',want);
 }
 notes.push('yt-dlp.exe sha256 '+sha(fs.readFileSync(yt)));
-// ffmpeg
+// ffmpeg: our own slim, audio-focused LGPL build (tools/build-ffmpeg-slim.sh), published as
+// assets of the "ffmpeg-slim-9.0.2" release of this repository and pinned here by checksum.
+const FF_VER='9.0.2',FF_SHA='b2722696ef30224ed9dae0e52135f043c3ee33a4613b848640b5752af387b00f';
+const FF_URL=`https://github.com/SnazzyGaz/desktop-phonograph/releases/download/ffmpeg-slim-${FF_VER}/`;
 const ff=path.join(out,'ffmpeg.exe');
-if(force||!fs.existsSync(ff)){
- const base='https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
- const want=(await get(base+'.sha256')).toString().trim().split(/\s+/)[0];
- const zip=await get(base);if(sha(zip)!==want)throw Error('ffmpeg zip checksum mismatch');
- const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'ffz-')),zf=path.join(tmp,'ff.zip');fs.writeFileSync(zf,zip);
- if(process.platform==='win32')execFileSync('tar',['-xf',zf,'-C',tmp]);else execFileSync('unzip',['-q',zf,'-d',tmp]);
- const dir=fs.readdirSync(tmp).find(n=>/^ffmpeg-.*essentials_build$/.test(n));if(!dir)throw Error('unexpected ffmpeg zip layout');
- fs.copyFileSync(path.join(tmp,dir,'bin','ffmpeg.exe'),ff);fs.copyFileSync(path.join(tmp,dir,'LICENSE'),path.join(out,'FFMPEG-LICENSE.txt'));
- fs.writeFileSync(path.join(out,'FFMPEG-VERSION.txt'),dir.replace(/^ffmpeg-|-essentials_build$/g,'')+'\n');
- fs.rmSync(tmp,{recursive:true,force:true});console.log('ffmpeg.exe ok',dir);
+if(force||!fs.existsSync(ff)||sha(fs.readFileSync(ff))!==FF_SHA){
+ const exe=await get(FF_URL+'ffmpeg.exe');if(sha(exe)!==FF_SHA)throw Error('ffmpeg.exe checksum mismatch');
+ fs.writeFileSync(ff,exe);fs.writeFileSync(path.join(out,'FFMPEG-LICENSE.txt'),await get(FF_URL+'FFMPEG-LICENSE.txt'));
+ fs.writeFileSync(path.join(out,'FFMPEG-VERSION.txt'),FF_VER+'\n');
+ console.log('ffmpeg.exe ok',FF_VER);
 }
 notes.push('ffmpeg.exe sha256 '+sha(fs.readFileSync(ff)));
 for(const f of ['yt-dlp.exe','ffmpeg.exe','FFMPEG-LICENSE.txt'])if(!fs.existsSync(path.join(out,f)))throw Error('missing '+f);

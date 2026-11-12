@@ -110,6 +110,9 @@ the same author; this project wraps them up as a desktop pet.
   at most once a day; if that ever breaks, the bundled copy is used.
 - **[FFmpeg](https://ffmpeg.org/)** (bundled) reads durations and tags, pulls cover art out
   of formats the page can't read, and turns anything Chromium can't decode into plain WAV.
+  It's a slim, audio-only build made for this app (about 9 MB instead of 105 MB): it can
+  open video files and pull the sound out of them, but has no video decoders at all.
+  The recipe is `tools/build-ffmpeg-slim.sh`.
 
 ### Page (`app/renderer/`)
 
@@ -187,9 +190,12 @@ npm run build:portable   # dist/Desk-Phonograph-<version>-portable.exe (single f
 npm run build:win        # dist/win-unpacked/ (an unpacked app folder, run "Desk Phonograph.exe")
 ```
 
-The two helper programs aren't kept in git; `fetch-tools` gets the latest yt-dlp
-release and the gyan.dev FFmpeg "release essentials" build and verifies both against
-their publishers' published SHA-256 checksums.
+The two helper programs aren't kept in git. `fetch-tools` gets the latest yt-dlp
+release (checked against yt-dlp's published SHA-256 sums) and our slim FFmpeg build from
+this repository's
+[`ffmpeg-slim-9.0.2`](https://github.com/SnazzyGaz/desktop-phonograph/releases/tag/ffmpeg-slim-9.0.2)
+release (checked against a checksum pinned in the script). To build that FFmpeg
+yourself, see `tools/build-ffmpeg-slim.sh`.
 
 Tests: `npm test` runs the quick unit checks (plain Node). The other scripts in `test/`
 drive the real app with `playwright-core` (and most need Linux + xvfb); see the comment
@@ -201,7 +207,7 @@ Made by **Garyck Arntzen** · [@_mintydoge](https://x.com/_mintydoge) on X.
 
 Desk Phonograph is released under the [MIT licence](LICENSE). The release builds bundle
 Electron, three.js, yt-dlp, FFmpeg and two open fonts, each under its own licence;
-see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). FFmpeg in the builds is GPLv3;
-its source is linked there and attached to each release.
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). FFmpeg in the builds is a slim
+LGPL build; its source and build recipe are linked there and attached to each release.
 
 Please only play things you have the right to play.
