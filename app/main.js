@@ -12,6 +12,7 @@ const path=require('path'),fs=require('fs'),fsp=fs.promises,os=require('os'),cry
 const {spawn}=require('child_process');
 const {readClipboardLink}=require('./clip-link');
 const Cover=require('./cover');
+const Links=require('./links');
 const Limits=require('./limits');
 
 app.setAppUserModelId?.('app.deskphonograph.pet');
@@ -472,7 +473,7 @@ function friendly(err){
 const jobs=new Map();
 ipcMain.handle('pet:link-info',async(e,url)=>{
  // What is behind the link: one track, or a list (playlist, mix, album)? Fast, nothing fetched.
- const r=await run(ytdlpPath(),['--flat-playlist','-J','--no-warnings','--ignore-config','--playlist-end','200',url],{timeout:90e3});
+ const kind=Links.classify(url),r=await run(ytdlpPath(),Links.infoArgs(url),{timeout:90e3});
  if(r.code!==0){
   log('link-info',url,r.err.slice(-600));
   if(/^https?:\/\/[^\s]+\.(mp3|wav|flac|ogg|oga|opus|m4a|aac)(\?|#|$)/i.test(url))return {kind:'direct',title:decodeURIComponent(url.split(/[?#]/)[0].split('/').pop())};
@@ -481,7 +482,7 @@ ipcMain.handle('pet:link-info',async(e,url)=>{
  let j;try{j=JSON.parse(r.out);}catch{return {error:'Sorry, that link wouldn\u2019t play.'};}
  const pick=x=>({url:x.webpage_url||x.url||x.original_url,id:x.id,title:x.track||x.title||'',artist:x.artist||x.uploader||x.channel||'',duration:x.duration||0,thumbs:Cover.thumbCandidates(x,x.webpage_url||x.url)});
  if(j._type==='playlist'&&Array.isArray(j.entries)){
-  const all=j.entries.filter(x=>x&&(x.url||x.webpage_url)&&!/\[(Private|Deleted) video\]/i.test(x.title||'')).map(pick);
+  const all=Links.startAt(j.entries,kind.video).filter(x=>x&&(x.url||x.webpage_url)&&!/\[(Private|Deleted) video\]/i.test(x.title||'')).map(pick);
   if(!all.length)return {error:'That list is empty, or nothing in it can be played.'};
   const {keep:entries,skipped}=Limits.splitList(all);
   if(!entries.length)return {error:Limits.LIST_TOO_LONG,tooLong:true};
@@ -489,7 +490,9 @@ ipcMain.handle('pet:link-info',async(e,url)=>{
  }
  if(j.is_live)return {error:friendly('is live')};
  if(Limits.tooLong(j.duration))return {error:Limits.TOO_LONG,tooLong:true};
- return {kind:'one',...pick(j),thumbs:Cover.thumbCandidates(j,j.webpage_url||url),url:j.webpage_url||url};
+ // a link with a list that came back as one track: the list is private or hidden (the track still plays)
+ if(kind.list&&!kind.mix)log('link-info','list not visible',kind.list);
+ return {kind:'one',...pick(j),thumbs:Cover.thumbCandidates(j,j.webpage_url||url),url:j.webpage_url||url,note:kind.list&&!kind.mix?Links.LIST_HIDDEN:undefined};
 });
 ipcMain.handle('pet:link-fetch',async(e,jobId,url,direct)=>{
  const id=crypto.randomBytes(8).toString('hex'),base=path.join(P.temp,id);

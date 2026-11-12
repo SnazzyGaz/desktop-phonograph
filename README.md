@@ -20,7 +20,10 @@ across your screens, scratch the record, and lift the needle to stop.
   from the file.
 - **Play a web link.** Copy a link to some audio or video, then right-click → *Play a web
   link*, press Ctrl+V on the phonograph, or drop the link on it. A playlist or album
-  arrives one sleeve at a time and plays in turn. Links to plain audio files work too.
+  arrives one sleeve at a time and plays in turn; a link to a track inside a list brings
+  the whole list, starting at that track. Endless auto-made mixes stop at 25. A private
+  list can't be seen, so only the linked track plays (it tells you). Links to plain
+  audio files work too.
 - **Keep a record.** Web records are temporary (the newest ten are kept). If you like
   one, right-click → *Keep this record* and it stays in the crate.
 - **Real record behaviour.** Lower the arm to play, lift it to stop. Grab the record to
@@ -104,7 +107,7 @@ the same author; this project wraps them up as a desktop pet.
   Putting a record away deletes only files the app itself fetched, never your own songs.
 - **Web links** are handled by a bundled copy of [yt-dlp](https://github.com/yt-dlp/yt-dlp),
   run hidden. It first asks what's behind the link (one track, or a list) without
-  fetching anything, then fetches the audio into a temp folder with progress shown on
+  fetching anything (`app/links.js` decides how a link is read), then fetches the audio into a temp folder with progress shown on
   the record. A writable copy of yt-dlp in the app's data folder updates itself quietly
   at most once a day; if that ever breaks, the bundled copy is used.
 - **[FFmpeg](https://ffmpeg.org/)** (bundled) reads durations and tags, pulls cover art out

@@ -106,4 +106,17 @@ const readme=fs.readFileSync(path.join(root,'README.md'),'utf8');ok(!/youtube|ri
  ok(sp.keep.length===3&&sp.skipped===1,'a list skips its long entries and counts them');
  const pp=fs.readFileSync(path.join(root,'app/renderer/pet-player.js'),'utf8');
  ok(pp.includes(L.TOO_LONG)&&/MAX_MIN=90/.test(pp),'the page and the main process say the same thing about long ones');}
+{const K=require(path.join(root,'app/links.js'));
+ const w=K.classify('https://www.youtube.com/watch?v=64CACoHNBEI&list=PL73cK50E0pZo871Hi7rZruwT3ZNNyEO4Z');
+ ok(w.list==='PL73cK50E0pZo871Hi7rZruwT3ZNNyEO4Z'&&w.video==='64CACoHNBEI'&&!w.mix,'a watch link with a list is the list, starting at that track');
+ const a=K.infoArgs('https://www.youtube.com/watch?v=64CACoHNBEI&list=PL73cK50E0pZo871Hi7rZruwT3ZNNyEO4Z');
+ ok(a.includes('--yes-playlist')&&!a.includes('--no-playlist')&&a[a.indexOf('--playlist-end')+1]==='200'&&a.includes('--flat-playlist'),'…and is looked at as a whole list (flat, up to 200)');
+ const m=K.classify('https://www.youtube.com/watch?v=64CACoHNBEI&list=RD64CACoHNBEI&start_radio=1');
+ ok(m.mix&&K.infoArgs('https://www.youtube.com/watch?v=x&list=RDx').includes(String(K.MIX_CAP))&&K.MIX_CAP<=25,'an endless auto-made mix is capped at '+K.MIX_CAP);
+ const one=K.classify('https://www.youtube.com/watch?v=64CACoHNBEI'),b=K.classify('https://youtu.be/64CACoHNBEI?list=PLx');
+ ok(!one.list&&one.video==='64CACoHNBEI'&&!K.infoArgs('https://www.youtube.com/watch?v=64CACoHNBEI').includes('--yes-playlist'),'a plain watch link is one track');
+ ok(b.video==='64CACoHNBEI'&&b.list==='PLx','short links keep their video and list');
+ ok(K.classify('https://www.youtube.com/playlist?list=PLx').list==='PLx'&&!K.classify('https://example.com/a.mp3').list&&!K.classify('not a url').list,'playlist pages, other sites and junk');
+ const r=K.startAt([{id:'a'},{id:'b'},{id:'c'}],'b').map(e=>e.id).join('');ok(r==='bca','the list starts at the pasted track, the earlier ones go round to the end');
+ ok(!/youtube/i.test(K.LIST_HIDDEN),'what it says never names a site');}
 process.exit(fails?1:0);

@@ -361,6 +361,7 @@ async function playLink(text){
  Object.assign(holder,{title:info.title||'',artist:info.artist||'',duration:info.duration||0,thumbs:info.thumbs||[],direct:info.kind==='direct'});
  await fetchEntry(holder);
  if(holder.file)await play(holder,{drop:true});
+ if(info.note&&holder.file)setTimeout(()=>say(info.note,'hint'),2500);
 }
 const fetching=new Set();
 async function fetchEntry(e){
