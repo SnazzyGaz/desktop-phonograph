@@ -157,6 +157,15 @@ function sleeveList(){
  stackOffset=Math.max(0,Math.min(stackOffset,Math.max(0,all.length-STACK)));
  return all.slice(stackOffset,stackOffset+STACK).map(sleeveOf);
 }
+/* The crate fan (double-click the crate): exactly the sleeves in the crate, in the same order,
+   then the rest of the most recently added list that didn't fit in the crate. Nothing else from
+   the library. */
+function fanSleeves(){
+ const crate=sleeveList(),shown=new Set(crate.map(s=>s.id));
+ let q=null,qAdded=-Infinity;for(const e of library.values())if(e.queue&&e.added>qAdded){qAdded=e.added;q=e.queue;}
+ const rest=q?[...library.values()].filter(e=>e.queue===q&&e.id!==currentId&&!shown.has(e.id)&&e.state!=='error').sort((a,b)=>a.qIndex-b.qIndex):[];
+ return [...crate,...rest.map(sleeveOf)];
+}
 let emitT=0;
 function emitSleeves(){clearTimeout(emitT);emitT=setTimeout(()=>{const cur=currentId&&library.get(currentId);
  window.dispatchEvent(new CustomEvent('vinyl-sleeves',{detail:{current:currentId,count:library.size,sleeves:sleeveList(),currentSleeve:cur?sleeveOf(cur):null}}));},30);}
@@ -451,7 +460,7 @@ window.vinyl={get record(){return record;},get state(){return state;},get down()
  get playing(){return down&&!state.grabbed;},
  transport,playPause,next,previous,goTo:id=>goTo(library.get(id)),playNext,setShuffle,setRepeat,
  get shuffle(){return shuffle;},get repeat(){return repeat;},get upNext(){return upNext.slice();},get order(){return seq();},get history(){return history.slice();},
- nextPreview:()=>pickNext('skip'),allSleeves:()=>seq().filter(id=>id!==currentId).map(id=>sleeveOf(library.get(id))),
+ nextPreview:()=>pickNext('skip'),allSleeves:()=>seq().filter(id=>id!==currentId).map(id=>sleeveOf(library.get(id))),fanSleeves,
  get nowPlaying(){const e=currentId&&library.get(currentId);return e?{title:e.title||titleOf(e),artist:e.artist||''}:null;}
 };
 setInterval(()=>{if(record){if(down&&!state.grabbed&&time()>=duration()-.01)finished();}},150);

@@ -32,8 +32,9 @@ across your screens, scratch the record, and lift the needle to stop.
 - **Records sized to the song.** A short song gets a 7-inch, a longer one a 12-inch, and
   the grooved band, run-out and lead-in sit where the song's spiral would.
 - **A crate of sleeves.** Point at a sleeve and its name appears. Click a sleeve to slide
-  the record half out, click again to play it. Double-click the crate to fan every
-  record out and pick one.
+  the record half out, click again to play it. Double-click the crate to fan out the
+  records in it, plus the rest of the last playlist you added if it didn't all fit, and
+  pick one. Up to nine show at a time; scroll for the rest.
 - **Player controls.** Three keys on the cabinet (previous, play/pause, next), a brass
   volume knob, a Now Playing card on the drawer, plus shuffle, repeat and auto-play
   next in the menus.
@@ -56,7 +57,7 @@ across your screens, scratch the record, and lift the needle to stop.
 | Click a sleeve, then click it again | slides the record out, then plays it |
 | Right-click a sleeve | *Play this record now*, *Play next* or *Put this record away* |
 | Click the brass button, bottom right of the front | swaps the hula girl and the shiba |
-| Double-click the crate | fans all the records out: click one to play it; Esc or a click elsewhere puts them back |
+| Double-click the crate | fans out the records in the crate (and the rest of the last playlist): click one to play it; scroll for more; Esc or a click elsewhere puts them back |
 | Space · ↑ ↓ · [ ] | play/pause · volume · speed |
 | Click the tray icon | hide or show the phonograph |
 

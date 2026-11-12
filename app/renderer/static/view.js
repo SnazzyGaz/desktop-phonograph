@@ -1110,7 +1110,7 @@ function updateFan(){
 }
 async function fanOpen(){
  if(fan.on||!PET)return false;
- const list=window.vinyl?.allSleeves?.()||[];if(!list.length){window.petShell?.say?.('No other records yet. Drop a song on me.','hint');return false;}
+ const list=window.vinyl?.fanSleeves?.()||[];if(!list.length){window.petShell?.say?.('No other records yet. Drop a song on me.','hint');return false;} // the crate's sleeves, then the overflow of the last list added
  clearSleevePop();sleeveDrag=null;setHoverNow(null);
  fan.on=true;fan.closing=false;fan.list=list;fan.scroll=0;fan.hover=null;fan.depth=0;fan.top=null;
  fan.g=new THREE.Group();fan.g.name='fan';scene.add(fan.g);buildFanCards();
