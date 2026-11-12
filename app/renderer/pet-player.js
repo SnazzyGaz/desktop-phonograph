@@ -129,7 +129,14 @@ let currentId=null,useCounter=0,stackOffset=0,autoNext=true,saveT=0;
    once per record so a shuffled pick is the same one that gets fetched ahead of time. */
 const Order=window.PlayOrder;
 let shuffle=false,repeat='off',played=[],history=[],upNext=[],planned=null;
-const STACK=6,TEMP_CAP=10,MAX_MIN=90;
+const STACK=6,TEMP_CAP=10,MAX_MIN=90,MAX_SEC=MAX_MIN*60;
+/* Long ones (over 20 minutes, unknown length, or a big file) are decoded by ffmpeg as mono at a lower
+   rate, so even an hour and a half stays well under a gigabyte; anything longer is turned away from its
+   length alone, before it is fetched or read. */
+const LONG_SEC=20*60,LONG_RATE=32000,BIG_BYTES=250e6;
+const TOO_LONG='That one is longer than an hour and a half: too long for a record, sorry.';
+const tooLongErr=()=>Object.assign(Error(TOO_LONG),{tooLong:true});
+let loadTok=0;
 const newId=()=>'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 function clock(t){t=Math.max(0,t);const m=Math.floor(t/60),s=Math.floor(t-m*60);return m+':'+(s<10?'0':'')+s;}
 function titleOf(e){return e.artist&&e.title?`${e.artist} — ${e.title}`:(e.title||'Record');}
@@ -155,7 +162,7 @@ let emitT=0;
 function emitSleeves(){clearTimeout(emitT);emitT=setTimeout(()=>{const cur=currentId&&library.get(currentId);
  window.dispatchEvent(new CustomEvent('vinyl-sleeves',{detail:{current:currentId,count:library.size,sleeves:sleeveList(),currentSleeve:cur?sleeveOf(cur):null}}));},30);}
 function persist(){clearTimeout(saveT);saveT=setTimeout(()=>{
- const list=[...library.values()].filter(e=>e.state!=='error'&&(e.kind==='file'||e.file||e.url)).map(e=>({id:e.id,title:e.title,artist:e.artist,kind:e.kind,path:e.kind==='file'?e.path:(e.file||null),url:e.url||null,kept:!!e.kept,duration:e.duration||0,added:e.added,used:e.used,queue:e.queue||null,qIndex:e.qIndex??null,thumbs:e.thumbs||undefined}));
+ const list=[...library.values()].filter(e=>e.state!=='error'&&!e.tooLong&&(e.kind==='file'||e.file||e.url)).map(e=>({id:e.id,bad:e.bad||undefined,title:e.title,artist:e.artist,kind:e.kind,path:e.kind==='file'?e.path:(e.file||null),url:e.url||null,kept:!!e.kept,duration:e.duration||0,added:e.added,used:e.used,queue:e.queue||null,qIndex:e.qIndex??null,thumbs:e.thumbs||undefined}));
  D.saveLibrary(list);},400);}
 function flipStack(dir){const before=stackOffset;stackOffset+=dir>0?1:-1;emitSleeves();const all=library.size-(currentId?1:0);
  if(stackOffset!==before&&all>STACK)say(`Records ${Math.max(1,Math.min(stackOffset,all-STACK)+1)}–${Math.min(all,Math.max(0,Math.min(stackOffset,all-STACK))+STACK)} of ${all}`,'hint');}
@@ -176,24 +183,34 @@ async function forget(id,quiet=false){
 /* ---------- decoding ---------- */
 async function decodeEntry(e){
  if(e.buffer)return e.buffer;
+ if(e.duration>MAX_SEC)throw tooLongErr();
  await ensureAudio(false);
  const file=e.kind==='file'?e.path:e.file;
- const r=await D.read(file);if(r.error)throw Error(r.error);
- let buf=null;
- try{buf=await ctx.decodeAudioData(r.bytes.slice(0));}catch{buf=null;}
- if(!buf){const t=await D.transcode(file);if(t.error)throw Error(t.error);try{buf=await ctx.decodeAudioData(t.bytes);}catch{throw Error('That file doesn’t seem to have any sound I can play.');}}
+ const p=await D.duration(file);if(p.error)throw Error(p.error);
+ if(p.duration>MAX_SEC)throw tooLongErr();
+ if(p.duration)e.duration=p.duration;
+ const long=e.bad||!p.duration||p.duration>LONG_SEC||p.size>BIG_BYTES;
+ let buf=null,bytes=null;
+ if(!long){const r=await D.read(file);if(r.error)throw Error(r.error);bytes=r.bytes;try{buf=await ctx.decodeAudioData(r.bytes.slice(0));}catch{buf=null;}}
+ if(!buf){const t=await D.transcode(file,long?{mono:true,rate:LONG_RATE}:{});if(t.error)throw Error(t.error);
+  try{buf=await (long?new OfflineAudioContext(1,1,LONG_RATE):ctx).decodeAudioData(t.bytes);}catch{throw Error('That file doesn’t seem to have any sound I can play.');}}
  if(buf.duration<.5)throw Error('That one is too short to make a record of.');
- if(buf.duration>MAX_MIN*60)throw Error('That one is longer than an hour and a half: too long for a record, sorry.');
+ if(buf.duration>MAX_SEC+.5)throw tooLongErr(); // (the decode stops just past the limit, so this is as far as it gets)
  // long ones are kept in mono so a long mix doesn't fill the computer's memory
- if(buf.duration>20*60&&buf.numberOfChannels>1){const m=ctx.createBuffer(1,buf.length,buf.sampleRate),o=m.getChannelData(0);
+ if(buf.duration>LONG_SEC&&buf.numberOfChannels>1){const m=ctx.createBuffer(1,buf.length,buf.sampleRate),o=m.getChannelData(0);
   for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<d.length;i++)o[i]+=d[i]/buf.numberOfChannels;}buf=m;}
  e.duration=buf.duration;e.buffer=buf;
- if(!e.cover&&!e.tagsTried)await tagsFor(e,r.bytes);
+ if(!e.cover&&!e.tagsTried)await tagsFor(e,bytes);
  return buf;
+}
+// Too long for a record: it goes from the stack (and its fetched sound with it), never saved.
+function refuseLong(e){
+ e.tooLong=true;e.buffer=null;if(library.get(e.id)===e&&e.id!==currentId){library.delete(e.id);D.forget(e.id,e.kind==='link'?e.file:null);}
+ emitSleeves();persist();say(TOO_LONG,'error');
 }
 async function tagsFor(e,bytes){
  e.tagsTried=true;
- let t={};try{t=Tags.readTags(bytes)||{};}catch{}
+ let t={};try{if(bytes)t=Tags.readTags(bytes)||{};}catch{}
  let cover=t.picture?await Tags.normaliseCover(t.picture.bytes,t.picture.mime):null;
  if((!t.title||!cover)&&e.kind==='file'){const p=await D.probe(e.path).catch(()=>({}));t={title:t.title||p.title,artist:t.artist||p.artist,...t};if(!cover&&p.picture)cover=await Tags.normaliseCover(await (await fetch(p.picture)).blob());}
  if(t.title&&e.kind==='file'){e.title=t.title;e.artist=t.artist||'';}
@@ -268,18 +285,25 @@ function mount(e,buf){
 }
 async function play(e,{drop:dropAfter=false}={}){
  if(busy)return false;busy=true;window.petShell?.busyState?.(true);
+ let tok=0,mounted=false;
  try{
   if(e.missing&&e.kind==='file')throw Error('That song isn’t where it used to be. It may have been moved or deleted.');
   if(e.kind==='link'&&!e.cover)coverFor(e,true);
   if(e.kind==='link'&&!e.file){await fetchEntry(e);if(!e.file)return false;}
+  if(e.duration>MAX_SEC)throw tooLongErr();
   say(`Putting on “${titleOf(e)}”…`,'busy');
+  // the main process is told which record is being put on, so a crash here doesn't repeat itself
+  tok=++loadTok;D.loading(e.id);
   const buf=await decodeEntry(e);
-  lift();mount(e,buf);say(`“${titleOf(e)}”: lower the arm to play.`,'hint');
+  lift();mount(e,buf);say(`“${titleOf(e)}”: lower the arm to play.`,'hint');mounted=true;
+  if(e.bad){e.bad=false;persist();}
   if(playWhenOn!=null){dropAfter=playWhenOn;playWhenOn=null;}
   if(dropAfter)setTimeout(()=>{if(record&&currentId===e.id&&!down)drop(0).catch(()=>{});},1900);
   return true;
- }catch(err){D.log('play',err?.message);e.buffer=null;say(err?.message||'Sorry, that one wouldn’t play.','error');return false;}
- finally{busy=false;window.petShell?.busyState?.(false);}
+ }catch(err){D.log('play',err?.message);e.buffer=null;if(err?.tooLong){refuseLong(e);return false;}say(err?.message||'Sorry, that one wouldn’t play.','error');return false;}
+ finally{busy=false;window.petShell?.busyState?.(false);
+  // (still "being put on" for a few seconds after it is on: the record's grooves are drawn then)
+  if(tok)setTimeout(()=>{if(loadTok===tok)D.loading(null);},mounted?6000:0);}
 }
 function swapTo(id){const e=library.get(id);if(!e||id===currentId)return false;
  if(e.state==='fetching'){say('Still getting that one ready…','hint');return false;}
@@ -324,9 +348,11 @@ async function playLink(text){
  if(info.error){library.delete(holder.id);emitSleeves();say(info.error,'error');return;}
  if(info.kind==='list'){
   library.delete(holder.id);
-  const qid=newId(),ents=info.entries;say(`A list of ${ents.length}: they’ll arrive one by one${autoNext?' and play in turn':''}.`,'hint');
+  const qid=newId(),ents=info.entries,sk=info.skipped||0;
+  say(`A list of ${ents.length}: they’ll arrive one by one${autoNext?' and play in turn':''}.${sk?` (I left out ${sk===1?'one that is':sk+' that are'} longer than an hour and a half.)`:''}`,'hint');
   const base=++useCounter;let first=null;
   ents.forEach((x,i)=>{const known=[...library.values()].find(e=>e.url===x.url);if(known)return;
+   if(x.duration>MAX_SEC)return;
    const e=add({kind:'link',url:x.url,title:x.title,artist:x.artist,duration:x.duration,thumbs:x.thumbs||[],state:'waiting',queue:qid,qIndex:i,used:base-i*1e-3});first??=e;});
   useCounter+=1;emitSleeves();
   if(first){await fetchEntry(first);if(first.file)await play(first,{drop:true});}
@@ -339,11 +365,13 @@ async function playLink(text){
 const fetching=new Set();
 async function fetchEntry(e){
  if(e.file||fetching.has(e.id))return waitFor(e);
+ if(e.duration>MAX_SEC){refuseLong(e);return;}
  fetching.add(e.id);e.state='fetching';e.pct=0;emitSleeves();
  const job=++jobN;progressFor.set(job,e);
  try{
   if(!e.cover)coverFor(e,true);
   const r=await D.linkFetch(job,e.url,!!e.direct);
+  if(r.tooLong){refuseLong(e);return;}
   if(r.error){e.state='error';e.error=r.error;emitSleeves();say(r.error,'error');setTimeout(()=>{if(library.get(e.id)===e&&e.state==='error'&&e.id!==currentId){library.delete(e.id);emitSleeves();}},8000);return;}
   e.file=r.file;e.state='ready';if(e.kept){const f=await D.keep(e.file,true);if(f)e.file=f;}
   emitSleeves();persist();trimTemp();
@@ -429,8 +457,10 @@ setInterval(()=>{if(record){if(down&&!state.grabbed&&time()>=duration()-.01)fini
 
 (async()=>{
  const st=await D.settings();vol=Number.isFinite(st.volume)?st.volume:.8;muted=!!st.muted;autoNext=st.autoNext!==false;shuffle=!!st.shuffle;repeat=['off','all','one'].includes(st.repeat)?st.repeat:'off';
+ const boot=await D.boot().catch(()=>({}))||{};let dropped=false;
  const list=await D.library();
  for(const x of list.sort((a,b)=>a.used-b.used)){
+  if(x.duration>MAX_SEC){D.forget(x.id,x.kind==='link'?x.path:null);dropped=true;continue;} // saved by an older version: too long to ever play
   const e={...x,used:++useCounter,cover:x.cover||null};
   if(e.kind==='link'){e.file=x.path||null;e.state=e.file&&!x.missing?'ready':(x.queue&&!x.kept?'waiting':'ready');if(x.missing||!e.file){e.file=null;}}
   library.set(e.id,e);
@@ -441,6 +471,11 @@ setInterval(()=>{if(record){if(down&&!state.grabbed&&time()>=duration()-.01)fini
  trimTemp();emitSleeves();
  D.tempSweep([...library.values()].map(e=>e.file).filter(Boolean));
  if(!library.size)say('Drop a song on me, or right-click → Play a web link.','hint');
- else{const last=ordered().find(e=>!e.missing&&(e.kind==='file'||e.file));if(last)play(last).then(()=>say('','hint'));}
+ else if(boot.quiet)say('Something went wrong with the last record, so I’ve started with nothing playing.','hint');
+ else{const last=ordered().find(e=>!e.missing&&!e.bad&&(e.kind==='file'||e.file));
+  const bad=boot.bad&&library.get(boot.bad);
+  if(last)play(last).then(()=>say(bad?`“${titleOf(bad)}” gave me trouble, so I’ve left it in its sleeve.`:'','hint'));
+  else if(bad)say(`“${titleOf(bad)}” gave me trouble, so I’ve left it in its sleeve.`,'hint');}
+ if(dropped)persist();
 })();
 })();

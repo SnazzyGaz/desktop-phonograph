@@ -12,6 +12,7 @@ const path=require('path'),fs=require('fs'),fsp=fs.promises,os=require('os'),cry
 const {spawn}=require('child_process');
 const {readClipboardLink}=require('./clip-link');
 const Cover=require('./cover');
+const Limits=require('./limits');
 
 app.setAppUserModelId?.('app.deskphonograph.pet');
 if(process.env.DESK_PHONO_DATA)app.setPath('userData',process.env.DESK_PHONO_DATA); // tests: a throwaway data folder
@@ -164,7 +165,7 @@ function createWindow(){
  win.on('close',e=>{if(!quitting){e.preventDefault();win.hide();}});
  win.webContents.on('will-navigate',e=>e.preventDefault());
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
- win.webContents.on('render-process-gone',(e,d)=>{log('renderer gone',d.reason);if(!quitting)setTimeout(()=>win?.reload(),800);});
+ win.webContents.on('render-process-gone',(e,d)=>{log('renderer gone',d.reason,loadingId?'while putting on '+loadingId:'');crashGuard();if(!quitting)setTimeout(()=>win?.reload(),800);});
  screen.on('display-removed',()=>place(clampHome({...bounds})));
  screen.on('display-metrics-changed',()=>place(keepOnScreen({...bounds})));
 }
@@ -319,7 +320,7 @@ function coverUrl(id){const f=path.join(P.covers,id+'.jpg');return fs.existsSync
 ipcMain.handle('pet:library-save',async(e,list)=>{
  if(!Array.isArray(list))return false;
  const clean=list.filter(x=>x&&safeId(x.id)).slice(0,500).map(x=>({id:x.id,title:String(x.title||'').slice(0,300),artist:String(x.artist||'').slice(0,200),kind:x.kind==='link'?'link':'file',
-  path:x.path?String(x.path):null,url:x.url?String(x.url).slice(0,2000):null,kept:!!x.kept,duration:Number(x.duration)||0,added:Number(x.added)||Date.now(),used:Number(x.used)||0,queue:x.queue||null,qIndex:Number.isFinite(x.qIndex)?x.qIndex:null,
+  path:x.path?String(x.path):null,url:x.url?String(x.url).slice(0,2000):null,kept:!!x.kept,duration:Number(x.duration)||0,added:Number(x.added)||Date.now(),used:Number(x.used)||0,queue:x.queue||null,qIndex:Number.isFinite(x.qIndex)?x.qIndex:null,bad:x.bad?true:undefined,
   thumbs:Array.isArray(x.thumbs)?x.thumbs.filter(u=>typeof u==='string'&&/^https?:\/\//i.test(u)).slice(0,16).map(u=>u.slice(0,2000)):undefined}));
  try{await fsp.writeFile(P.library+'.tmp',JSON.stringify(clean,null,1));await fsp.rename(P.library+'.tmp',P.library);return true;}catch(err){log('library',err.message);return false;}
 });
@@ -353,11 +354,36 @@ ipcMain.handle('pet:read',async(e,file)=>{
 // Anything Chromium can't decode is turned into a plain WAV by the bundled ffmpeg.
 ipcMain.handle('pet:transcode',async(e,file,{mono=false,rate=0}={})=>{
  const out=path.join(P.temp,'decode-'+crypto.randomBytes(6).toString('hex')+'.wav');
- const args=['-hide_banner','-loglevel','error','-y','-i',file,'-vn','-map','0:a:0'];if(mono)args.push('-ac','1');else args.push('-ac','2');if(rate)args.push('-ar',String(rate));args.push('-c:a','pcm_s16le','-f','wav',out);
+ const args=['-hide_banner','-loglevel','error','-y','-i',file,'-vn','-map','0:a:0'];if(mono)args.push('-ac','1');else args.push('-ac','2');if(rate)args.push('-ar',String(rate));args.push('-t',String(Limits.MAX_SEC+1),'-c:a','pcm_s16le','-f','wav',out);
  const r=await run(ffmpegPath(),args,{timeout:10*60e3});
  if(r.code!==0||!fs.existsSync(out)){log('transcode',file,r.err.slice(-500));return {error:'That file doesn\u2019t seem to have any sound I can play.'};}
  try{const b=await fsp.readFile(out);return {bytes:b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)};}finally{fsp.rm(out,{force:true}).catch(()=>{});}
 });
+// How long a file is and how big, from its header only (nothing decoded): checked before it is read.
+ipcMain.handle('pet:duration',async(e,file)=>{
+ let size=0;try{const st=await fsp.stat(file);if(!st.isFile())throw Error('not a file');size=st.size;}
+ catch(err){return {error:err.code==='ENOENT'?'That song isn\u2019t where it used to be. It may have been moved or deleted.':'That file couldn\u2019t be opened.'};}
+ if(size>AUDIO_MAX)return {error:'That file is too big to play as a record.',size};
+ const r=await run(ffmpegPath(),['-hide_banner','-nostdin','-i',file],{timeout:30e3});
+ return {duration:Limits.parseDuration(r.err),size};
+});
+/* Crash-loop guard. The page says which record it is putting on (reading, decoding, first drawing).
+   If the page crashes then, that record is marked bad in the library so it is not put on again by
+   itself; two crashes within a minute and the page starts with nothing playing. */
+let loadingId=null,crashes=[],quietStart=false,lastBad=null;
+ipcMain.on('pet:loading',(e,id)=>{loadingId=safeId(id)?String(id):null;});
+ipcMain.handle('pet:boot',()=>{const r={quiet:quietStart,bad:lastBad};lastBad=null;return r;});
+function crashGuard(){
+ const now=Date.now();crashes=crashes.filter(t=>now-t<60e3);crashes.push(now);
+ if(crashes.length>=2)quietStart=true;
+ const id=loadingId;loadingId=null;if(id){lastBad=id;markBad(id);}
+}
+function markBad(id){
+ try{const list=JSON.parse(fs.readFileSync(P.library,'utf8'));let hit=false;
+  for(const x of Array.isArray(list)?list:[])if(x&&x.id===id){x.bad=true;hit=true;}
+  if(hit){fs.writeFileSync(P.library+'.tmp',JSON.stringify(list,null,1));fs.renameSync(P.library+'.tmp',P.library);log('marked bad',id);}
+ }catch(err){log('mark bad',err.message);}
+}
 // Tags + picture for formats the page can't read itself (OGG, WAV, WMA...).
 ipcMain.handle('pet:probe',async(e,file)=>{
  const meta=path.join(P.temp,'meta-'+crypto.randomBytes(6).toString('hex')+'.txt'),pic=meta.replace(/\.txt$/,'.jpg');
@@ -390,7 +416,7 @@ function bundled(name){
 function ffmpegPath(){return bundled('ffmpeg');}
 const ytCopy=path.join(P.bin,'yt-dlp'+EXE);
 let ytGood=null; // the writable copy, once it has answered --version
-function ytdlpPath(){return ytGood||bundled('yt-dlp');}
+function ytdlpPath(){if(process.env.DESK_PHONO_TEST&&process.env.DESK_PHONO_YTDLP)return process.env.DESK_PHONO_YTDLP;return ytGood||bundled('yt-dlp');}
 function run(cmd,args,{timeout=0,onLine}={}){
  return new Promise(res=>{
   let out='',err='',done=false,buf='';
@@ -445,11 +471,14 @@ ipcMain.handle('pet:link-info',async(e,url)=>{
  let j;try{j=JSON.parse(r.out);}catch{return {error:'Sorry, that link wouldn\u2019t play.'};}
  const pick=x=>({url:x.webpage_url||x.url||x.original_url,id:x.id,title:x.track||x.title||'',artist:x.artist||x.uploader||x.channel||'',duration:x.duration||0,thumbs:Cover.thumbCandidates(x,x.webpage_url||x.url)});
  if(j._type==='playlist'&&Array.isArray(j.entries)){
-  const entries=j.entries.filter(x=>x&&(x.url||x.webpage_url)&&!/\[(Private|Deleted) video\]/i.test(x.title||'')).map(pick);
-  if(!entries.length)return {error:'That list is empty, or nothing in it can be played.'};
-  return {kind:'list',title:j.title||'',entries};
+  const all=j.entries.filter(x=>x&&(x.url||x.webpage_url)&&!/\[(Private|Deleted) video\]/i.test(x.title||'')).map(pick);
+  if(!all.length)return {error:'That list is empty, or nothing in it can be played.'};
+  const {keep:entries,skipped}=Limits.splitList(all);
+  if(!entries.length)return {error:Limits.LIST_TOO_LONG,tooLong:true};
+  return {kind:'list',title:j.title||'',entries,skipped};
  }
  if(j.is_live)return {error:friendly('is live')};
+ if(Limits.tooLong(j.duration))return {error:Limits.TOO_LONG,tooLong:true};
  return {kind:'one',...pick(j),thumbs:Cover.thumbCandidates(j,j.webpage_url||url),url:j.webpage_url||url};
 });
 ipcMain.handle('pet:link-fetch',async(e,jobId,url,direct)=>{
@@ -464,12 +493,13 @@ ipcMain.handle('pet:link-fetch',async(e,jobId,url,direct)=>{
   }catch(err){log('direct',url,err.message);return {error:friendly(err.message)};}
  }
  const args=['--no-playlist','--ignore-config','--no-warnings','--no-mtime','--no-part','-f','bestaudio[ext=m4a]/bestaudio[acodec=opus]/bestaudio/best[height<=480]/best',
-  '--ffmpeg-location',path.dirname(ffmpegPath()),'--max-filesize','1500m','-o',base+'.%(ext)s',
+  '--ffmpeg-location',path.dirname(ffmpegPath()),'--max-filesize','1500m','--match-filter','duration <=? '+Limits.MAX_SEC,'-o',base+'.%(ext)s',
   '--print','after_move:@@FILE %(filepath)s','--progress','--newline','--progress-template','download:@@PCT %(progress._percent_str)s',url];
  const job={cancel:false};jobs.set(jobId,job);
  const r=await run(ytdlpPath(),args,{timeout:30*60e3,onLine:l=>{const m=/@@PCT\s*([\d.]+)%/.exec(l);if(m)progress(Number(m[1]),'fetching');}});
  jobs.delete(jobId);
  const m=/@@FILE (.+)/.exec(r.out);
+ if(!m&&/does not pass filter/i.test(r.out+r.err)){log('fetch too long',url);return {error:Limits.TOO_LONG,tooLong:true};}
  if(r.code!==0||!m){log('fetch',url,r.code,r.err.slice(-800));return {error:friendly(r.err)};}
  const f=m[1].trim();if(!fs.existsSync(f))return {error:'Sorry, that link wouldn\u2019t play.'};
  return {file:f};

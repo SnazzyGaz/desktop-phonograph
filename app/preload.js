@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('desk',{
  saveCover:(id,url)=>ipcRenderer.invoke('pet:cover-save',id,url),forget:(id,file)=>ipcRenderer.invoke('pet:forget',id,file),
  keep:(file,on)=>ipcRenderer.invoke('pet:keep',file,on),
  read:file=>ipcRenderer.invoke('pet:read',file),transcode:(file,opts)=>ipcRenderer.invoke('pet:transcode',file,opts),probe:file=>ipcRenderer.invoke('pet:probe',file),
+ duration:file=>ipcRenderer.invoke('pet:duration',file),loading:id=>ipcRenderer.send('pet:loading',id||null),boot:()=>ipcRenderer.invoke('pet:boot'),
  image:url=>ipcRenderer.invoke('pet:image',url),coverFrom:cands=>ipcRenderer.invoke('pet:cover-from',cands),linkThumbs:(url,deep)=>ipcRenderer.invoke('pet:link-thumbs',url,deep),
  linkInfo:url=>ipcRenderer.invoke('pet:link-info',url),linkFetch:(job,url,direct)=>ipcRenderer.invoke('pet:link-fetch',job,url,direct),
  tempSweep:files=>ipcRenderer.invoke('pet:temp-sweep',files),

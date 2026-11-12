@@ -5,7 +5,7 @@ import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';im
 const require=createRequire(import.meta.url);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
-for(const f of ['app/renderer/static/view.js','app/renderer/static/post.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js','app/clip-link.js','app/renderer/play-order.js','app/cover.js'])
+for(const f of ['app/renderer/static/view.js','app/renderer/static/post.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js','app/clip-link.js','app/renderer/play-order.js','app/cover.js','app/limits.js'])
  {try{const src=fs.readFileSync(path.join(root,f),'utf8');if(/static\/(view|post)\.js$/.test(f)){const tmp=path.join(root,'test','.check-'+path.basename(f,'.js')+'.mjs');fs.writeFileSync(tmp,src);try{execFileSync(process.execPath,['--check',tmp]);}finally{fs.rmSync(tmp);}}else execFileSync(process.execPath,['--check',path.join(root,f)]);ok(true,'parses: '+f);}catch(e){ok(false,'parses: '+f);}}
 const html=fs.readFileSync(path.join(root,'app/renderer/index.html'),'utf8');
 const map=/<script type="importmap">([\s\S]*?)<\/script>/.exec(html)[1],h=crypto.createHash('sha256').update(map).digest('base64');
@@ -98,4 +98,12 @@ const readme=fs.readFileSync(path.join(root,'README.md'),'utf8');ok(!/youtube|ri
  ok(got&&got.index===3&&got.dataUrl.startsWith('data:image/webp;base64,')&&asked.length===4,`mocked fetch: a 404, a grey stand-in and a web page are skipped; the 4th picture is used (asked ${asked.length})`);
  ok(await C.firstImage(['https://i.test/a'],async()=>{throw new Error('offline');})===null&&await C.firstImage([],fake)===null&&await C.fetchImage('file:///c:/x.jpg',fake)===null,'offline, no candidates, or not a web address: no cover, no error');
  ok(await C.fetchImage('https://i.test/real-small',async()=>resp(200,'image/jpeg',jpeg(120,90,2888)))!==null,'a real 120x90 picture (a few KB) is still a cover');}
+// record length limits (1.0.10): lengths read from ffmpeg's header line, lists keep only what fits
+{const L=require(path.join(root,'app','limits.js'));
+ ok(L.parseDuration('  Duration: 02:55:43.21, start: 0.000000, bitrate: 129 kb/s')===10543.21&&L.parseDuration('Duration: N/A, bitrate: N/A')===0&&L.parseDuration('')===0,'lengths are read from the file header (2:55:43 = 10543 s; unknown = 0)');
+ ok(L.tooLong(10543)&&L.tooLong(5401)&&!L.tooLong(5400)&&!L.tooLong(0)&&!L.tooLong(undefined),'over an hour and a half is too long; exactly 90 min, or unknown, is not refused by length alone');
+ const sp=L.splitList([{duration:200},{duration:10543},{duration:0},{duration:5400}]);
+ ok(sp.keep.length===3&&sp.skipped===1,'a list skips its long entries and counts them');
+ const pp=fs.readFileSync(path.join(root,'app/renderer/pet-player.js'),'utf8');
+ ok(pp.includes(L.TOO_LONG)&&/MAX_MIN=90/.test(pp),'the page and the main process say the same thing about long ones');}
 process.exit(fails?1:0);
