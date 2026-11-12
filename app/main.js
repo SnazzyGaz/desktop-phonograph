@@ -75,7 +75,7 @@ let bounds=null; // the pet's own rect on screen (DIP); what is saved, sized and
    sleeves and dragging within a screen never resize or move the window (nothing can jump or blank);
    only crossing to another screen moves it. A stage exactly the size of the whole monitor (taskbar
    hidden) is kept 1 px smaller so Windows never takes it for a full-screen app. */
-let stage=null,off={x:0,y:0};const stageStats={setBounds:0,moved:0,resized:0};
+let stage=null,off={x:0,y:0},stageFixAt=0;const stageStats={setBounds:0,moved:0,resized:0};
 function stageFor(b){
  const d=screen.getDisplayNearestPoint({x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}),wa={...d.workArea},db=d.bounds;
  if(wa.x===db.x&&wa.y===db.y&&wa.width===db.width&&wa.height===db.height){wa.x++;wa.y++;wa.width-=2;wa.height-=2;}
@@ -83,10 +83,15 @@ function stageFor(b){
 }
 function layout(){return {ox:off.x,oy:off.y,w:bounds.width,h:bounds.height,min:MIN,max:MAX,aspect:ASPECT};}
 function setStage(s,quiet){
- const cur=win&&!win.isDestroyed()?win.getBounds():stage; // (the real window: something else may have moved it)
- if(!stage||!cur||s.x!==cur.x||s.y!==cur.y||s.width!==cur.width||s.height!==cur.height){
+ // Only touch the OS window when the stage we want changed, or something else really moved it (by
+ // more than a few px). The bounds read back are not always what was set (rounded at 125%/150%
+ // display scaling, or the window manager's say): comparing them exactly with the stage moved and
+ // resized the whole-screen window on every mouse move of a drag (a whole-PC stall).
+ const live=win&&!win.isDestroyed(),cur=live?win.getBounds():null,eq=(a,b)=>a&&b&&a.x===b.x&&a.y===b.y&&a.width===b.width&&a.height===b.height;
+ const away=Date.now()-stageFixAt>1000&&!!(cur&&stage&&(Math.abs(cur.x-stage.x)>8||Math.abs(cur.y-stage.y)>8||Math.abs(cur.width-stage.width)>8||Math.abs(cur.height-stage.height)>8));
+ if(!stage||!eq(s,stage)||away){if(away)stageFixAt=Date.now(); // (at most once a second if it keeps reading back elsewhere)
   if(stage&&(s.width!==stage.width||s.height!==stage.height))stageStats.resized++;else if(stage)stageStats.moved++;
-  stage={...s};stageStats.setBounds++;win?.setBounds(stage);}
+  stage={...s};stageStats.setBounds++;if(live)win.setBounds(stage);}
  const o={x:bounds.x-stage.x,y:bounds.y-stage.y},sized=bounds.width!==off.w||bounds.height!==off.h;
  if(o.x!==off.x||o.y!==off.y||sized){off={...o,w:bounds.width,h:bounds.height};if(!quiet)send('pet:stage',layout());}
 }

@@ -1299,7 +1299,7 @@ function zoomTick(now){
  const dt=Math.min(.05,Math.max(.001,(now-(zoomG.tl||now))/1000));zoomG.tl=now;
  const a=Math.log(zoomG.s),b=Math.log(zoomG.target),k=1-Math.exp(-dt*16);let n=a+(b-a)*k;if(Math.abs(b-n)<.002)n=b;
  zoomG.s=Math.exp(n);view.style.transform=`scale(${zoomG.s})`;
- if(zoomG.s===zoomG.target&&now-zoomG.last>200){zoomG.tl=0;zoomSettle();return;}
+ if(zoomG.s===zoomG.target&&now-zoomG.last>200&&!(drag||armHold||sleeveDrag||knobFx.drag)){zoomG.tl=0;zoomSettle();return;} // never re-lay the canvas under a hand (scratching right after a scroll)
  zoomG.raf=requestAnimationFrame(zoomTick);
 }
 async function zoomSettle(now=false){
@@ -1944,14 +1944,21 @@ function drawFrameInner(nowMs){
  if(!firstDrawn){firstDrawn=true;performance.mark?.('vv:first');renderer.domElement.setAttribute?.('data-ready','');
   shiba?.load().then(ok=>{if(ok){renderer.shadowMap.needsUpdate=true;shadowPending=true;performance.mark?.('vv:shiba');}invalidate(3);});}
 }
-let sleepT=null,rafOn=false,lastDrawAt=0,lastInputAt=0;
+let sleepT=null,rafOn=false,lastDrawAt=0,lastInputAt=0;const HELD_GAP=24;
 for(const t of ['pointermove','pointerdown','wheel'])renderer.domElement.addEventListener(t,()=>{lastInputAt=performance.now();},{passive:true});
 function frame(){
  rafOn=false;
  if(!PET)requestAnimationFrame(frame);
  const now=performance.now();
  const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy||(fan.g&&fan.cards.some(c=>c.userData.anim));
+ // a hand on the record (scratching), the arm, a sleeve, the knob or the pet itself
+ const held=PET&&!inspect.active&&!!(drag||armHold||sleeveDrag||knobFx.drag||window.petShell?.busy);
+ if(PET)post.hold?.(held); // no resolution/tier switch (a canvas reallocation) in the middle of a gesture
  if(PET&&!hands&&dirty<=0&&now-lastDrawAt<31){rafOn=true;requestAnimationFrame(frame);return;} // at most ~30 fps while it only spins (rAF-quantised)
+ // Under a hand: at most ~40 fps. The window covers the screen, so every frame is a whole-screen
+ // transparent window for the OS to compose; drawn at a 144 Hz monitor's full rate while scratching
+ // it stalled the whole PC. The sound follows the pointer events themselves, not the frames.
+ if(held&&now-lastDrawAt<HELD_GAP){rafOn=true;requestAnimationFrame(frame);return;}
  // inspect: up to 60 fps while you turn or zoom it (or it flies), ~30 while it is only held; never the
  // monitor's full rate (a 144 Hz screen drew every frame of a big window)
  if(PET&&inspect.active&&now-lastDrawAt<((now-lastInputAt<300||camTween)?15:31)){rafOn=true;requestAnimationFrame(frame);return;}
@@ -1959,7 +1966,10 @@ function frame(){
  const {busy}=tickScene(dt, now);
  const draw=busy||dirty>0||drag||armHold||sleeveDrag;
  if(draw){drawFrame(now);lastDrawAt=now;window.petShell?.drew?.();}else post.idle();
- if(PET){if(draw||hands){rafOn=true;requestAnimationFrame(frame);}else sleepT=setTimeout(()=>{sleepT=null;if(!rafOn){rafOn=true;requestAnimationFrame(frame);}},250);}
+ // One loop only: something drawn above may already have woken it (invalidate() -> wakeLoop), and a
+ // second requestAnimationFrame here would start a second loop that draws every frame again (each
+ // grab or scratch added one: double, triple... draws per screen refresh).
+ if(PET&&!rafOn){if(draw||hands){rafOn=true;requestAnimationFrame(frame);}else if(!sleepT)sleepT=setTimeout(()=>{sleepT=null;if(!rafOn){rafOn=true;requestAnimationFrame(frame);}},250);}
 }
 wakeLoop=()=>{if(sleepT){clearTimeout(sleepT);sleepT=null;}if(!rafOn){rafOn=true;requestAnimationFrame(frame);}};
 Object.assign(window.vinylView,{

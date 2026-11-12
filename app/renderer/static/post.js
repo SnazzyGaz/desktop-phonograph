@@ -93,8 +93,10 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
  }
  // Frame-time tracker: only frames that were actually drawn back-to-back count.
  let samples=[],lastDrawn=0,cool=0;
+ let held=false; // a hand on the record, arm, knob or sleeve: no resolution or tier change until it lets go
  function adapt(now){
   if(mode!=='auto'){lastDrawn=now;return;}
+  if(held){lastDrawn=0;samples=[];return;}
   if(lastDrawn&&now-lastDrawn<500)samples.push(now-lastDrawn);lastDrawn=now;
   if(cool>0){cool--;return;}
   if(samples.length<(samples.some(x=>x>60)?12:45))return; // badly slow frames: react after a dozen, not 45
@@ -110,6 +112,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
  // So changes wait for the next render and are applied just before it draws.
  function later(d){pendingDpr=d;onChange?.(state());}
  function applyPending(){
+  if(held)return; // never reallocate the canvas mid-gesture (it is applied on the first draw after)
   if(pendingBuild){pendingBuild=false;build();}
   if(pendingDpr!=null){const d=pendingDpr;pendingDpr=null;if(Math.abs(d-dpr)>.01){dpr=d;renderer.setPixelRatio(dpr);resize(w,h);}}
  }
@@ -129,9 +132,10 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
  // Lite: skip ambient occlusion, depth of field and bloom (the pet's inspect: a record held up against nothing)
  function applyLite(){if(gtao)gtao.enabled=!lite;if(dof)dof.enabled=!lite;if(bloom)bloom.enabled=!lite;}
  function setLite(on){lite=!!on;applyLite();}
- function state(){return {mode,tier,dpr:pendingDpr??dpr,lite};}
+ function state(){return {mode,tier,dpr:pendingDpr??dpr,lite,held};}
  // Pause adaptation across idle gaps (render-on-demand leaves long pauses).
  function idle(){lastDrawn=0;}
+ function hold(on){on=!!on;if(on!==held){held=on;samples=[];lastDrawn=0;}}
  build();
- return {render,resize,setMode,setDprCap,setLite,state,idle,focus,get tier(){return tier;}};
+ return {render,resize,setMode,setDprCap,setLite,state,idle,hold,focus,get tier(){return tier;}};
 }
