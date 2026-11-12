@@ -5,7 +5,7 @@
 //  3) a 3-hour file on this computer: refused from its header, never read or decoded
 //  4) a record marked bad is skipped at start; a crash while putting one on marks it bad;
 //     two crashes within a minute and the page starts with nothing playing
-// Box only: PLAYWRIGHT=/workspace/pw/node_modules/playwright-core xvfb-run -a node test/long.mjs
+// Linux + xvfb: PLAYWRIGHT=/path/to/playwright-core xvfb-run -a node test/long.mjs
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

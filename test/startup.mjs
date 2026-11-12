@@ -1,9 +1,9 @@
-// Start-up on Gaz's two screens: DISPLAY1 0,0 1920x1080 (work 1920x1040) and DISPLAY3 1920,0 1920x1080,
+// Start-up on a typical two-screen setup: DISPLAY1 0,0 1920x1080 (work 1920x1040) and DISPLAY3 1920,0 1920x1080,
 // both 100%, with the pet saved on the right one at {x:3143,y:434,width:594,height:530}. The screen is
 // filmed from before launch: the window must not show anything big (the pet drawn at the size of the
 // whole window, or an opaque frame), the pet must show up at its saved place and stay, and the app
 // must still be running 10 s later.
-// Box only: xvfb-run -a -s "-screen 0 3840x1080x24" node test/startup.mjs
+// Linux + xvfb: xvfb-run -a -s "-screen 0 3840x1080x24" node test/startup.mjs
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {spawn,execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

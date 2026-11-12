@@ -1,6 +1,6 @@
 // Link covers, end to end in the page: a saved link record with no cover gets one when the library
 // loads, from its list of pictures tried in order (a 404, a plain grey 120x90 stand-in big enough to
-// pass the byte check, a web page, then a real picture). Box only: xvfb-run -a node test/covers.mjs
+// pass the byte check, a web page, then a real picture). Linux + xvfb: xvfb-run -a node test/covers.mjs
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import http from 'http';import {execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

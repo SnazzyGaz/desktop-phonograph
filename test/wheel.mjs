@@ -1,7 +1,7 @@
 // Scroll-to-size: a 20-notch wheel burst over the cabinet (12 up, 8 down, 45 ms apart; WHEEL_UP=n for n up).
 // Measures setBounds calls, page frame pacing, canvas reallocations, blank frames, and from a
 // 60 fps X screen recording the pet's on-screen size per frame and how far the point under the
-// cursor drifts. Box only: xvfb-run -a -s "-screen 0 1600x1000x24" node test/wheel.mjs song.mp3
+// cursor drifts. Linux + xvfb: xvfb-run -a -s "-screen 0 1600x1000x24" node test/wheel.mjs song.mp3
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {spawn,execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

@@ -1,6 +1,6 @@
 // Dragging the pet: the window covers the screen's work area and never moves (a drag only moves the
 // canvas inside it), the pet follows the cursor, no frame is blank, and the grabbed spot stays under
-// the cursor. Box only: xvfb-run -a -s "-screen 0 1600x1000x24" node test/drag.mjs song.mp3
+// the cursor. Linux + xvfb: xvfb-run -a -s "-screen 0 1600x1000x24" node test/drag.mjs song.mp3
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {spawn,execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

@@ -80,7 +80,7 @@ let bounds=null; // the pet's own rect on screen (DIP); what is saved, sized and
 let stage=null,off={x:0,y:0},stageFixAt=0,awayStrikes=0;const stageStats={setBounds:0,moved:0,resized:0};
 /* Several screens. Since 1.0.9 each screen has its own stage again and crossing to another screen is
    a hand-off (see setStage); the shared stage below is off unless settings.sharedStage is true: a
-   window over two screens (3840 px wide on a pair of HD screens) started blank on Gaz's PC in 1.0.8.
+   window over two screens (3840 px wide on a pair of HD screens) started blank on a two-screen PC in 1.0.8.
    Shared stage: neighbouring screens at the same display scaling share one stage (the box round
    their work areas), so walking the pet from one to the other never moves the window at all: no
    hand-off, nothing to flash, and the pet is whole while it straddles the join. Screens at different

@@ -3,7 +3,7 @@
 // scaling or not, crossing is one hand-off and the pet is never drawn in the wrong place (0 ghost
 // frames; blank frames are counted). The shared stage (opt-in, settings.sharedStage): the window never
 // moves (0 setBounds), no blank frames, no jumps.
-// Box only: xvfb-run -a -s "-screen 0 3200x1000x24" node test/monitors.mjs song.mp3
+// Linux + xvfb: xvfb-run -a -s "-screen 0 3200x1000x24" node test/monitors.mjs song.mp3
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';import {spawn,execFileSync} from 'child_process';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

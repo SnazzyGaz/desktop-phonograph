@@ -3,7 +3,7 @@
 // the hand angle at once, what the drag costs the main process (IPC messages, window calls) and the
 // page (canvas reallocations, pixel-ratio changes, draws per second), the frame gaps, and page errors.
 // SCALE=1.5 runs it on a high-DPI screen (where the pixel ratio could adapt mid-drag).
-// Box only: xvfb-run -a -s "-screen 0 1600x1000x24" node test/scratch.mjs song.mp3
+// Linux + xvfb: xvfb-run -a -s "-screen 0 1600x1000x24" node test/scratch.mjs song.mp3
 process.on('unhandledRejection',e=>{console.log('TEST ERROR',e&&e.stack||e);process.exit(2);});
 import {createRequire} from 'module';import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';import os from 'os';
 const require=createRequire(import.meta.url);const {_electron}=require(process.env.PLAYWRIGHT||'playwright-core');

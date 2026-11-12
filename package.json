@@ -13,7 +13,8 @@
     "test": "node test/unit.mjs",
     "test:e2e": "node test/e2e.mjs",
     "icon": "python3 tools/make-icon.py",
-    "build:win": "node tools/fetch-tools.mjs && electron-builder --win --x64 --dir --publish never"
+    "build:win": "node tools/fetch-tools.mjs && electron-builder --win --x64 --dir --publish never",
+    "build:portable": "node tools/fetch-tools.mjs && electron-builder --win portable --x64 --publish never"
   },
   "devDependencies": {
     "electron": "45.2.3",
@@ -22,7 +23,7 @@
   "build": {
     "appId": "app.deskphonograph.pet",
     "productName": "Desk Phonograph",
-    "copyright": "Copyright \u00a9 2026 Garyck Arntzen",
+    "copyright": "Copyright © 2026 Garyck Arntzen",
     "directories": {
       "output": "dist",
       "buildResources": "app/build"
@@ -61,20 +62,26 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "app/build/icon.ico",
       "signAndEditExecutable": true,
       "artifactName": "Desk-Phonograph-${version}-Windows-${arch}.${ext}"
     },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "runAfterFinish": true,
-      "artifactName": "Desk-Phonograph-${version}-Setup.${ext}",
-      "shortcutName": "Desk Phonograph",
-      "uninstallDisplayName": "Desk Phonograph",
-      "deleteAppDataOnUninstall": false
+    "portable": {
+      "artifactName": "Desk-Phonograph-${version}-portable.${ext}",
+      "unpackDirName": "DeskPhonograph"
     }
+  },
+  "homepage": "https://github.com/SnazzyGaz/desktop-phonograph",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SnazzyGaz/desktop-phonograph.git"
   }
 }

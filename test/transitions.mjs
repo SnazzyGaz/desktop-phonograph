@@ -1,6 +1,6 @@
 // Every mode change keeps the pet still and never flashes: the crate fan (open/close), record
 // Inspect (in/out), sleeve pop (click) and tuck (Esc), the sleeve hover title, playing a popped
-// sleeve, and the dancer swap. Box only (Linux + xvfb + ffmpeg): records the X screen at 60 fps and
+// sleeve, and the dancer swap. Linux + xvfb + ffmpeg: records the X screen at 60 fps and
 // checks every frame: the machine (around the volume knob, or the crate's front-left while a
 // held record covers the knob) is where it was within 1 px, the pet is
 // always drawn (no blank frame, no sudden dip in drawn pixels), and the window never changes.
