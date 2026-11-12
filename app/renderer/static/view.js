@@ -478,12 +478,28 @@ function buildShibaSpot(R,top,W,D){
 function shibaMusic(v,t){
  if(!shiba||toyChoice!=='shiba'||!v.down||v.state.grabbed)return null;const b=v.buffer;return b?shiba.features(b,t):null;
 }
+/* The shiba's mesh (shiba.bin, 1.4 MB) loads only once he is wanted. On the desk pet the page is a
+   file:// page, where fetch() can't read files, so the bytes come from the main process. If he
+   can't be loaded the hula girl stays and the reason goes to the log. */
+let shibaLoading=null;
+function ensureShiba(){
+ if(!shiba)return Promise.resolve(false);if(shiba.loaded)return Promise.resolve(true);if(shibaLoading)return shibaLoading;
+ const fail=why=>{console.warn('shiba toy not loaded:',why);window.desk?.log?.('shiba',String(why));return false;};
+ const get=window.desk?.toyData?window.desk.toyData().then(b=>{if(!b||!b.byteLength)throw new Error('no shiba.bin');const u=b instanceof Uint8Array?b:new Uint8Array(b);return shiba.fromBuffer(u.buffer.slice(u.byteOffset,u.byteOffset+u.byteLength));})
+  :shiba.load().then(r=>{if(!shiba.loaded)throw new Error('fetch skipped or failed');return r;});
+ return shibaLoading=get.then(()=>{
+  if(!shiba.loaded||!phonograph.getObjectByName('shiba-toy')?.children.length)return fail('mesh did not attach');
+  if(toyChoice==='shiba'&&toyAnim.t>=1){toyAnim.from=null;toyAnim.to='shiba';toyAnim.t=reduce()?1:.38;} // pop him in now he is here
+  applyToys();invalidate(3);return true;
+ }).catch(e=>{shibaLoading=null;if(toyChoice==='shiba')swapToy('hula',true);return fail(e?.message||e);});
+}
 function updateShiba(music){
  if(!shiba||!shiba.loaded)return false;
  return shiba.update(Math.min(.05,Math.max(.001,frameDt||1/60)),music,reduce());
 }
-/* ---------- secret toy switch: a small brass pip low on the cabinet front ----------
-   Press it to swap the shiba and the hula girl (one shows at a time; shiba by default).
+/* ---------- toy switch: a brass pip low on the cabinet front, right of the keys ----------
+   Press it (or "Swap toy" in the right-click menu) to swap the hula girl and the shiba (one
+   shows at a time; the hula girl by default).
    The old toy shrinks away, the new one pops up with a little overshoot, the pip clicks
    in. The choice is kept in localStorage. */
 const TOY_KEY='vinyl-toy',TOYS=['shiba','hula'];
@@ -508,11 +524,12 @@ function toyClick(){ // a short brass tick: band-passed noise, at the player's v
   const src=c.createBufferSource(),bp=c.createBiquadFilter(),g=c.createGain();src.buffer=b;bp.type='bandpass';bp.frequency.value=3200;bp.Q.value=3;g.gain.value=.5*(window.vinyl?.volume??.7);
   src.connect(bp);bp.connect(g);g.connect(c.destination);src.start();}catch{}
 }
-function swapToy(to){
+function swapToy(to,quiet=false){
  const next=to&&TOYS.includes(to)?to:(toyChoice==='shiba'?'hula':'shiba');if(next===toyChoice&&toyAnim.t>=1)return toyChoice;
  toyAnim.from=toyChoice;toyAnim.to=next;toyAnim.t=reduce()?1:0;toyAnim.press=reduce()?1:0;toyChoice=next;
- try{localStorage.setItem(TOY_KEY,next);}catch{}
- toyClick();applyToys();invalidate(3);return next;
+ try{localStorage.setItem(TOY_KEY,next);}catch{}window.desk?.set?.({toy:next});
+ if(next==='shiba')ensureShiba();
+ if(!quiet)toyClick();applyToys();invalidate(3);return next;
 }
 function updateToys(dt){
  let busy=false;
@@ -523,10 +540,10 @@ function updateToys(dt){
 function buildToySwitch(R,W,D,bodyBot,brass){
  const g=new THREE.Group();g.name='toy-switch';g.userData.pick='toy-switch';
  const faceY=-D+R*.02,x=W-R*.2,z=bodyBot+R*.16;g.position.set(x,faceY,z);
- const bezel=new THREE.Mesh(new THREE.TorusGeometry(R*.024,R*.006,10,32),brass);bezel.rotation.x=Math.PI/2;g.add(bezel);
- const pip=new THREE.Mesh(new THREE.SphereGeometry(R*.02,20,12,0,Math.PI*2,0,Math.PI/2),brass);pip.name='toy-switch-pip';pip.rotation.z=Math.PI;pip.scale.set(1,.55,1);
- pip.userData.y0=0;pip.userData.travel=R*.008;g.add(pip);
- // invisible, larger touch target so a 3 mm pip is still easy to hit
+ const bezel=new THREE.Mesh(new THREE.TorusGeometry(R*.05,R*.009,10,32),brass);bezel.rotation.x=Math.PI/2;g.add(bezel);
+ const pip=new THREE.Mesh(new THREE.SphereGeometry(R*.044,24,12,0,Math.PI*2,0,Math.PI/2),brass);pip.name='toy-switch-pip';pip.rotation.z=Math.PI;pip.scale.set(1,.55,1);
+ pip.userData.y0=0;pip.userData.travel=R*.012;g.add(pip);
+ // invisible, larger touch target round the pip (it is only ~8 px across at the default pet size)
  const hitM=new THREE.MeshBasicMaterial({visible:false});hitM.userData.shared=true;
  const hit=new THREE.Mesh(new THREE.SphereGeometry(R*.06,10,8),hitM);hit.name='toy-switch-hit';g.add(hit);
  return g;
@@ -1406,7 +1423,7 @@ function buildPhonograph(R){
  phonograph.add(buildShibaSpot(R,top,W,D)); // after the traverse: the fur shells set their own shadow flags
  {const sw=buildToySwitch(R,W,D,bodyBot,brass);sw.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(sw);}
  if(PET){const tp=buildTransport(R,W,D,bodyBot,H,brass,bakelite),dr=buildDrawer(R,W,D,bodyBot,brass,mahogany),kn=buildVolumeKnob(R,W,D,bodyBot,brass,bakelite);knobFx.shown=-1;for(const x of [tp,dr,kn]){x.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=o.material.visible!==false;}});phonograph.add(x);}}
- applyToys();
+ applyToys();if(toyChoice==='shiba')ensureShiba();
  const shadow=contactDecal(2*W+R*.95,2*D+R*.95,.8);if(shadow){shadow.position.z=tableZ+.4;phonograph.add(shadow);}
  key.target.position.set(0,0,tableZ*.5);dropRing.scale.setScalar(R*1.05);dropRing.position.z=.4;invalidate();
 }

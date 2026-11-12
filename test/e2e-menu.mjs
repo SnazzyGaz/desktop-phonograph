@@ -116,7 +116,7 @@ await popupItem('Play the next one automatically');await wait(500);ok((await st(
 ok(settingsFile().autoNext===!s.auto,'…and remembers it');
 await popupItem('Play the next one automatically');ok((await st()).auto===s.auto,'…and back');
 ok(!(await labelsOf('popup').catch(()=>[])).some(l=>/Needle close-up/.test(l)),'no needle close-up item any more');
-await popupItem('Swap the dancer');ok((await st()).toy!==s.toy,`“Swap the dancer” → ${(await st()).toy}`);
+await popupItem('Swap toy (hula girl / shiba)');ok((await st()).toy!==s.toy,`“Swap toy” → ${(await st()).toy}`);
 ok(await mainUntil(()=>global.__deskPhono.win.isAlwaysOnTop(),5000),'it really is on top before the toggle (put back if Windows dropped it)');const top0=true;
 await popupItem('Always on top');ok(await mainUntil(new Function(`return global.__deskPhono.win.isAlwaysOnTop()===${!top0}`),2500)&&await until(()=>/top|cover/.test(document.getElementById('bubbleText').textContent),4000)&&await fileUntil(x=>x.onTop===false),`“Always on top” → ${!top0}, and says so (“${await bubble()}”)`);
 await popupItem('Always on top');ok(await M(()=>global.__deskPhono.win.isAlwaysOnTop())===top0,'…and back');

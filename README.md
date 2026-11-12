@@ -37,8 +37,9 @@ across your screens, scratch the record, and lift the needle to stop.
 - **Desktop-pet manners.** Empty space around it clicks straight through to whatever is
   underneath. It remembers where you left it, how big it was and your records. A tray
   icon hides it and brings it back. It works across several monitors.
-- **Toys.** The hula dancer on the lid moves to the music; the small brass button low
-  on the front swaps her for a shiba.
+- **Toys.** The hula girl on the lid's front-left corner dances to the music. Swap her
+  for a shiba (who wiggles along too) with the round brass button at the bottom right
+  of the cabinet front, or with *Swap toy* in the right-click menu. Your choice is kept.
 
 ## Using it
 
@@ -46,11 +47,12 @@ across your screens, scratch the record, and lift the needle to stop.
 |---|---|
 | Drag the cabinet | moves it anywhere, onto any screen (give it a throw and it slides and bounces off screen edges) |
 | Scroll over it | makes it bigger or smaller |
-| Right-click | the menu: play/pause, next, previous, shuffle, repeat, volume, speed, keep, always on top, hide, quit |
+| Right-click | the menu: play/pause, next, previous, shuffle, repeat, volume, speed, keep, swap toy, always on top, hide, quit |
 | Click a key on the cabinet | previous · play/pause · next |
 | Drag the brass knob (or scroll on it) | volume |
 | Click a sleeve, then click it again | slides the record out, then plays it |
 | Right-click a sleeve | *Play this record now*, *Play next* or *Put this record away* |
+| Click the brass button, bottom right of the front | swaps the hula girl and the shiba |
 | Double-click the crate | fans all the records out: click one to play it; Esc or a click elsewhere puts them back |
 | Space · ↑ ↓ · [ ] | play/pause · volume · speed |
 | Click the tray icon | hide or show the phonograph |
@@ -125,6 +127,9 @@ the same author; this project wraps them up as a desktop pet.
   finer than a pixel, so nothing is generated from the audio.
 - `static/vinyl-core.js`: sizes each record from the song's length (7- or 12-inch,
   45 or 33⅓ rpm) and works out the spiral the needle follows.
+- `static/shiba.js` and `static/shiba.bin`: the shiba, a baked furry mesh (1.4 MB) that
+  jiggles to the bass. It is only loaded once you swap to him; the main process reads
+  `shiba.bin` for the page, since a `file://` page can't `fetch()` its own files.
 - `play-order.js`: shuffle, repeat and what plays next.
 
 ### Covers for web links (`app/cover.js`)

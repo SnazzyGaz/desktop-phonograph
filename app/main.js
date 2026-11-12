@@ -304,7 +304,7 @@ ipcMain.handle('pet:menu',(e,st)=>{
   {label:'Keep this record',type:'checkbox',visible:!!st.canKeep,checked:!!st.kept,click:()=>send('pet:command',{cmd:'keep'})},
   {label:'Put this record away',visible:!!st.sleeve,click:()=>send('pet:command',{cmd:'forget',id:st.sleeve})},
   {label:'Play the next one automatically',type:'checkbox',checked:settings.autoNext,click:m=>{settings.autoNext=m.checked;saveSettings();send('pet:command',{cmd:'autoNext',on:m.checked});}},
-  {label:'Swap the dancer',click:()=>send('pet:command',{cmd:'toy'})},
+  {label:'Swap toy (hula girl / shiba)',click:()=>send('pet:command',{cmd:'toy'})},
   {label:'Always on top',type:'checkbox',checked:settings.onTop,click:m=>{settings.onTop=m.checked;saveSettings();win.setAlwaysOnTop(m.checked,'floating');send('pet:command',{cmd:'say',kind:'hint',text:m.checked?'Stays on top of other windows':'Other windows can cover it now'});}},
   {type:'separator'},
   {label:'Hide (click the tray icon to bring it back)',click:toggleShown},
@@ -314,6 +314,8 @@ ipcMain.handle('pet:menu',(e,st)=>{
  return true;
 });
 ipcMain.handle('pet:settings',()=>({...settings}));
+// The shiba's baked mesh. The page is a file:// page and fetch() can't read file:// URLs, so it asks here.
+ipcMain.handle('pet:toy-data',async()=>{try{return await fsp.readFile(path.join(__dirname,'renderer','static','shiba.bin'));}catch(e){log('shiba.bin',e&&e.message);return null;}});
 ipcMain.on('pet:set',(e,patch)=>{if(patch&&typeof patch==='object'){for(const k of ['volume','muted','toy','autoNext','shuffle','repeat'])if(k in patch)settings[k]=patch[k];saveSettings();}});
 ipcMain.handle('pet:clipboard',async()=>{try{return String(await readClipboardLink(clip)||'').trim();}catch(e){log('clipboard',e&&e.message);return '';}});
 

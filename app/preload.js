@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('desk',{
  stageGet:()=>ipcRenderer.invoke('pet:stage'),onStage:fn=>on('pet:stage',fn),
  onStageHold:fn=>on('pet:stage-hold',fn),stageHeld:n=>ipcRenderer.send('pet:stage-held',n),handoffReady:()=>ipcRenderer.send('pet:stage-handoff-ok'),
  menu:state=>ipcRenderer.invoke('pet:menu',state),
- settings:()=>ipcRenderer.invoke('pet:settings'),set:patch=>ipcRenderer.send('pet:set',patch),
+ settings:()=>ipcRenderer.invoke('pet:settings'),toyData:()=>ipcRenderer.invoke('pet:toy-data'),set:patch=>ipcRenderer.send('pet:set',patch),
  clipboard:()=>ipcRenderer.invoke('pet:clipboard'),
  room:step=>ipcRenderer.invoke('pet:room',step),
  library:()=>ipcRenderer.invoke('pet:library'),saveLibrary:list=>ipcRenderer.invoke('pet:library-save',list),
