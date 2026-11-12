@@ -5,7 +5,7 @@ import fs from 'fs';import {fileURLToPath} from 'url';import path from 'path';im
 const require=createRequire(import.meta.url);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 let fails=0;const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m);if(!c)fails++;};
-for(const f of ['app/renderer/static/view.js','app/renderer/static/post.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js','app/clip-link.js','app/renderer/play-order.js'])
+for(const f of ['app/renderer/static/view.js','app/renderer/static/post.js','app/main.js','app/preload.js','app/renderer/pet-player.js','app/renderer/pet-shell.js','app/renderer/pet-boot.js','app/clip-link.js','app/renderer/play-order.js','app/cover.js'])
  {try{const src=fs.readFileSync(path.join(root,f),'utf8');if(/static\/(view|post)\.js$/.test(f)){const tmp=path.join(root,'test','.check-'+path.basename(f,'.js')+'.mjs');fs.writeFileSync(tmp,src);try{execFileSync(process.execPath,['--check',tmp]);}finally{fs.rmSync(tmp);}}else execFileSync(process.execPath,['--check',path.join(root,f)]);ok(true,'parses: '+f);}catch(e){ok(false,'parses: '+f);}}
 const html=fs.readFileSync(path.join(root,'app/renderer/index.html'),'utf8');
 const map=/<script type="importmap">([\s\S]*?)<\/script>/.exec(html)[1],h=crypto.createHash('sha256').update(map).digest('base64');
@@ -70,4 +70,32 @@ const readme=fs.readFileSync(path.join(root,'README.md'),'utf8');ok(!/youtube|ri
   ok(O.notePlayed({played:['a','b','c']},'d',4).join()==='d','a finished cycle starts the played list again');
   ok(O.prev(seq,'c',{shuffle:true,history:['a','d','c']})==='d'&&O.prev(seq,'a',{shuffle:true,history:['a']})===null,'shuffle Previous walks back through what actually played');}
  ok(O.next([],'a',{})===null&&O.next(['a'],'a',{shuffle:true,repeat:'all'})==='a'&&O.next(seq,'zz',{})==='a','edge cases: empty, one record, a record no longer in the list');}
+// link covers: an ordered list of pictures, tried until one really is a picture
+{const C=require(path.join(root,'app/cover.js'));
+ const jpeg=(w,h,n)=>{const b=Buffer.alloc(Math.max(n,24));b.set([0xff,0xd8,0xff,0xe0,0,4,0,0,0xff,0xc0,0,11,8]);b.writeUInt16BE(h,13);b.writeUInt16BE(w,15);return b;};
+ const resp=(status,type,body)=>({ok:status>=200&&status<300,status,headers:{get:k=>/content-type/i.test(k)?type:null},arrayBuffer:async()=>body.buffer.slice(body.byteOffset,body.byteOffset+body.byteLength)});
+ const id='dQw4w9WgXcQ',one={id,ie_key:'Youtube',thumbnail:`https://i.ytimg.com/vi_webp/${id}/maxresdefault.webp`,thumbnails:[{url:'https://x.test/a.jpg',width:120,height:90},{url:'https://x.test/b.jpg',width:480,height:360},{url:'https://x.test/huge.jpg',width:1920,height:1080}]};
+ const c1=C.thumbCandidates(one,'https://www.youtube.com/watch?v='+id);
+ ok(c1[0]===one.thumbnail&&c1.indexOf('https://x.test/b.jpg')<c1.indexOf('https://x.test/a.jpg')&&c1.indexOf('https://x.test/a.jpg')<c1.indexOf('https://x.test/huge.jpg')&&c1.at(-1)===`https://i.ytimg.com/vi/${id}/default.jpg`&&c1.includes(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`)&&new Set(c1).size===c1.length,`a single video: its named pictures biggest first (over 1280 wide last), then the standard sizes (${c1.length} candidates)`);
+ const flat=C.thumbCandidates({id,ie_key:'Youtube',url:'https://www.youtube.com/watch?v='+id});
+ ok(flat.length===5&&flat[0].endsWith('/maxresdefault.jpg')&&flat[1].endsWith('/sddefault.jpg')&&flat[4].endsWith('/default.jpg'),'a list entry with no pictures still gets the five standard sizes');
+ ok(C.thumbCandidates({},'https://youtu.be/'+id+'?t=3').length===5&&C.thumbCandidates({},'https://example.com/song').length===0&&C.thumbCandidates({thumbnail:'https://cdn.test/t.png'},'https://vimeo.com/1').join()==='https://cdn.test/t.png','address-only links: short links work, other sites keep only their own pictures');
+ {const many=C.thumbCandidates({id,ie_key:'Youtube',thumbnails:Array.from({length:40},(_,i)=>({url:'https://x.test/n'+i+'.jpg'}))});ok(many.length===16&&many.at(-1).endsWith('/default.jpg')&&many.at(-5).endsWith('/maxresdefault.jpg'),'a long list of named pictures never crowds out the standard sizes');}
+ ok(C.thumbCandidates({thumbnails:[{url:'https://x.test/1.jpg'},{url:'https://x.test/2.jpg'}]}).join()==='https://x.test/2.jpg,https://x.test/1.jpg','pictures with no sizes: last listed first');
+ const png=Buffer.alloc(40);png.set([0x89,0x50,0x4e,0x47,13,10,26,10]);png.writeUInt32BE(300,16);png.writeUInt32BE(200,20);
+ const webp=Buffer.alloc(40);webp.write('RIFF',0,'latin1');webp.write('WEBPVP8X',8,'latin1');webp.writeUIntLE(1279,24,3);webp.writeUIntLE(719,27,3);
+ const ii=[C.imageInfo(jpeg(640,480,3000)),C.imageInfo(png),C.imageInfo(webp),C.imageInfo(Buffer.from('<html>not found</html>'))];
+ ok(ii[0].width===640&&ii[0].height===480&&ii[1].type==='image/png'&&ii[1].width===300&&ii[2].type==='image/webp'&&ii[2].width===1280&&ii[2].height===720&&ii[3]===null,'picture sizes read from JPEG, PNG and WebP headers; a web page is not a picture');
+ // mocked fetch: 1st is missing (404 with the grey stand-in), 2nd answers 200 but is the stand-in, 3rd is HTML, 4th works (sent as a plain byte stream)
+ const cands=['https://i.test/maxres.jpg','https://i.test/sd.jpg','https://i.test/page','https://i.test/hq.webp','https://i.test/mq.jpg'],asked=[];
+ const fake=async u=>{asked.push(u);
+  if(u.endsWith('maxres.jpg'))return resp(404,'image/jpeg',jpeg(120,90,1097));
+  if(u.endsWith('sd.jpg'))return resp(200,'image/jpeg',jpeg(120,90,1097));
+  if(u.endsWith('/page'))return resp(200,'text/html',Buffer.from('<!doctype html><title>x</title>'));
+  if(u.endsWith('hq.webp'))return resp(200,'application/octet-stream',webp);
+  throw new Error('should have stopped');};
+ const got=await C.firstImage(cands,fake);
+ ok(got&&got.index===3&&got.dataUrl.startsWith('data:image/webp;base64,')&&asked.length===4,`mocked fetch: a 404, a grey stand-in and a web page are skipped; the 4th picture is used (asked ${asked.length})`);
+ ok(await C.firstImage(['https://i.test/a'],async()=>{throw new Error('offline');})===null&&await C.firstImage([],fake)===null&&await C.fetchImage('file:///c:/x.jpg',fake)===null,'offline, no candidates, or not a web address: no cover, no error');
+ ok(await C.fetchImage('https://i.test/real-small',async()=>resp(200,'image/jpeg',jpeg(120,90,2888)))!==null,'a real 120x90 picture (a few KB) is still a cover');}
 process.exit(fails?1:0);

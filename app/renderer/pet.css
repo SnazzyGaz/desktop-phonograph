@@ -23,3 +23,4 @@ body.dropping #view{filter:drop-shadow(0 0 10px rgba(255,214,130,.9))}
 #hoverTitle b{font:600 12.5px/1.25 var(--text)}
 #hoverTitle span{font:500 11px/1.25 var(--text);color:#d9c39a}
 #hoverTitle span:empty{display:none}
+html.handoff body{visibility:hidden}

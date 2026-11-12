@@ -1249,8 +1249,27 @@ let petFrame=null; // {w0,h0,ox,oy,w,h}: the pet's frame inside a canvas that co
 const stage={ox:0,oy:0,w:0,h:0,min:220,max:1100,aspect:1.12,ready:false};
 const roomUsers=new Set(); // 'inspect', 'fan': the canvas covers the window while either needs it
 let roomOn=false;const stageLog=[];
+/* Moving to another screen (only one at a different display scaling): the main process asks the page
+   to show nothing first; once a blank frame is on screen it moves the window, then sends the pet's
+   new place with 'reveal'. Placing the canvas is a compositor move (nothing redrawn), so the next
+   frame has the pet whole at its new place: a blink at worst, never the pet in the wrong place. */
+const handoffs={held:0,revealed:0,last:null};let HOLD_MS=34;
+function stageHold(n){
+ document.documentElement.classList.add('handoff');handoffs.held++;handoffs.last={n,t:performance.now()};
+ // a few frames, so the blank one has been put on screen (not just drawn) before the window moves
+ requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(()=>window.desk?.stageHeld?.(n),HOLD_MS))));
+}
 function applyStage(s){
- if(!s)return;const sized=!stage.ready||s.w!==stage.w||s.h!==stage.h;Object.assign(stage,s,{ready:true});
+ if(!s)return;
+ if(s.reveal!=null){ // show the pet only once the window really is at its new place (the move can lag the message)
+  const at=s.at,t0=performance.now();s={...s};delete s.reveal;delete s.at;
+  const go=()=>{applyStageInner(s);document.documentElement.classList.remove('handoff');handoffs.revealed++;handoffs.waited=Math.round(performance.now()-t0);invalidate();};
+  const moved=()=>!at||(Math.abs(window.screenX-at.x)<=2&&Math.abs(window.screenY-at.y)<=2);
+  if(moved())go();else{const check=()=>{if(moved()||performance.now()-t0>250)go();else requestAnimationFrame(check);};requestAnimationFrame(check);}
+  return;}
+ applyStageInner(s);
+}
+function applyStageInner(s){const sized=!stage.ready||s.w!==stage.w||s.h!==stage.h;Object.assign(stage,s,{ready:true});
  const st=document.documentElement.style;
  st.setProperty('--px',stage.ox+'px');st.setProperty('--py',stage.oy+'px');st.setProperty('--pw',stage.w+'px');st.setProperty('--ph',stage.h+'px');
  if(sized){stageLog.push({t:performance.now(),...s});if(stageLog.length>40)stageLog.shift();}
@@ -1622,6 +1641,11 @@ function updateSwap(dt){
  return busy;
 }
 window.addEventListener('vinyl-record',e=>mountRecord(e.detail));
+// The cover of the record already on the turntable arrived late (a link's picture): reprint its label.
+window.addEventListener('vinyl-cover',e=>{const r=window.vinyl?.record,d=e.detail;if(!r||!d||d.id!==r.id||!d.cover)return;r.cover=d.cover;
+ const label=disc.getObjectByName('vinyl-label');if(!label||label.userData.art||typeof Image!=='function')return;
+ const img=new Image();img.decoding='async';img.onload=()=>{if(!label.parent)return;const art=labelPrint(label.userData.title,r.metadata,img);if(!art)return;
+  label.material.map?.dispose();label.material.map=art;label.material.needsUpdate=true;label.userData.art=true;invalidate();};img.src=d.cover;});
 
 /* ---------- pointer handling ---------- */
 function setRay(event){const b=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-b.left)/b.width*2-1,-(event.clientY-b.top)/b.height*2+1);ray.setFromCamera(pointer,camera);}
@@ -1817,7 +1841,7 @@ function resize(){const w=view.clientWidth,h=view.clientHeight;if(!w||!h)return;
 } // passes read the updated projection
 let resizeDraws=0,resizeReady=false,lastPostW=0,lastPostH=0;
 new ResizeObserver(resize).observe(view);resize();
-if(PET&&window.desk?.onStage){window.desk.onStage(applyStage);window.desk.stageGet?.().then(applyStage);}
+if(PET&&window.desk?.onStage){window.desk.onStage(applyStage);window.desk.onStageHold?.(stageHold);window.desk.stageGet?.().then(applyStage);}
 function loudness(v,t){
  if(!v.down||v.state.grabbed)return 0;const b=v.buffer||v.grooveBuffer;if(!b)return 0;
  const ch=b.getChannelData(0),sr=b.sampleRate,c=Math.floor(t*sr),n=Math.floor(sr*.035);let s=0,k=0;
@@ -1942,6 +1966,7 @@ function drawFrameInner(nowMs){
  post.focus?.(inspect.active?camera.position.distanceTo(disc.position):camera.position.distanceTo(focusPoint.set(R*.15,0,4)));
  post.render(nowMs);if(dirty>0)dirty--;placeTitle();
  if(!firstDrawn){firstDrawn=true;performance.mark?.('vv:first');renderer.domElement.setAttribute?.('data-ready','');
+  if(PET)window.desk?.handoffReady?.();
   shiba?.load().then(ok=>{if(ok){renderer.shadowMap.needsUpdate=true;shadowPending=true;performance.mark?.('vv:shiba');}invalidate(3);});}
 }
 let sleepT=null,rafOn=false,lastDrawAt=0,lastInputAt=0;const HELD_GAP=24;
@@ -1977,7 +2002,7 @@ Object.assign(window.vinylView,{
  get inspect(){return inspect}, get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
  swapToy, get phonograph(){return phonograph},
- fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, applyStage, zoomWheel, setQuality:m=>post.setMode(m),
+ fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, applyStage, handoffs, zoomWheel, setQuality:m=>post.setMode(m),
  fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, knobPoint(){const k=phonograph.getObjectByName('volume-knob');if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},
  beginInspection, returnRecord, finishInspection, flyTo, snapToDefault, defaultPose, presentPose,

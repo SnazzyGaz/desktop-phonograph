@@ -11,6 +11,7 @@ const {app,BrowserWindow,ipcMain,Menu,Tray,screen,clipboard,dialog,nativeImage,s
 const path=require('path'),fs=require('fs'),fsp=fs.promises,os=require('os'),crypto=require('crypto');
 const {spawn}=require('child_process');
 const {readClipboardLink}=require('./clip-link');
+const Cover=require('./cover');
 
 app.setAppUserModelId?.('app.deskphonograph.pet');
 if(process.env.DESK_PHONO_DATA)app.setPath('userData',process.env.DESK_PHONO_DATA); // tests: a throwaway data folder
@@ -75,10 +76,28 @@ let bounds=null; // the pet's own rect on screen (DIP); what is saved, sized and
    sleeves and dragging within a screen never resize or move the window (nothing can jump or blank);
    only crossing to another screen moves it. A stage exactly the size of the whole monitor (taskbar
    hidden) is kept 1 px smaller so Windows never takes it for a full-screen app. */
-let stage=null,off={x:0,y:0},stageFixAt=0;const stageStats={setBounds:0,moved:0,resized:0};
+let stage=null,off={x:0,y:0},stageFixAt=0,awayStrikes=0;const stageStats={setBounds:0,moved:0,resized:0};
+/* Several screens: neighbouring screens at the same display scaling share one stage (the box round
+   their work areas), so walking the pet from one to the other never moves the window at all: no
+   hand-off, nothing to flash, and the pet is whole while it straddles the join. Screens at different
+   scaling can't share a window (Windows gives a window one scale), so crossing to one of those moves
+   the window, with a hand-off that never shows the pet in the wrong place (see setStage). The shared
+   stage is kept within a size the graphics card handles comfortably. */
+const STAGE_MAX_PX=8192,STAGE_MAX_AREA=2.2; // physical px per side; times the pet's own screen's area
+const touch=(a,b)=>a.x<=b.x+b.width+2&&b.x<=a.x+a.width+2&&a.y<=b.y+b.height+2&&b.y<=a.y+a.height+2;
+function boxOf(rs){const x=Math.min(...rs.map(r=>r.x)),y=Math.min(...rs.map(r=>r.y));return {x,y,width:Math.max(...rs.map(r=>r.x+r.width))-x,height:Math.max(...rs.map(r=>r.y+r.height))-y};}
+function stageGroup(b){
+ const c={x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)},d=screen.getDisplayNearestPoint(c);
+ let all=[];try{all=screen.getAllDisplays();}catch{}
+ const sf=d.scaleFactor||1,same=all.filter(o=>o.id!==d.id&&(o.scaleFactor||1)===sf);
+ const fits=g=>{const bx=boxOf(g.map(o=>o.workArea));return bx.width*sf<=STAGE_MAX_PX&&bx.height*sf<=STAGE_MAX_PX&&bx.width*bx.height<=STAGE_MAX_AREA*d.workArea.width*d.workArea.height;};
+ const g=[d];for(let grew=true;grew;){grew=false;for(const o of same)if(!g.includes(o)&&g.some(x=>touch(x.bounds,o.bounds))&&fits([...g,o])){g.push(o);grew=true;}}
+ return g;
+}
 function stageFor(b){
- const d=screen.getDisplayNearestPoint({x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}),wa={...d.workArea},db=d.bounds;
- if(wa.x===db.x&&wa.y===db.y&&wa.width===db.width&&wa.height===db.height){wa.x++;wa.y++;wa.width-=2;wa.height-=2;}
+ const g=stageGroup(b),wa=boxOf(g.map(o=>o.workArea));
+ // never exactly cover a whole screen (Windows would take it for a full-screen app)
+ if(g.some(o=>{const w=o.workArea,db=o.bounds;return w.x===db.x&&w.y===db.y&&w.width===db.width&&w.height===db.height;})){wa.x++;wa.y++;wa.width-=2;wa.height-=2;}
  return wa;
 }
 function layout(){return {ox:off.x,oy:off.y,w:bounds.width,h:bounds.height,min:MIN,max:MAX,aspect:ASPECT};}
@@ -88,13 +107,38 @@ function setStage(s,quiet){
  // display scaling, or the window manager's say): comparing them exactly with the stage moved and
  // resized the whole-screen window on every mouse move of a drag (a whole-PC stall).
  const live=win&&!win.isDestroyed(),cur=live?win.getBounds():null,eq=(a,b)=>a&&b&&a.x===b.x&&a.y===b.y&&a.width===b.width&&a.height===b.height;
- const away=Date.now()-stageFixAt>1000&&!!(cur&&stage&&(Math.abs(cur.x-stage.x)>8||Math.abs(cur.y-stage.y)>8||Math.abs(cur.width-stage.width)>8||Math.abs(cur.height-stage.height)>8));
- if(!stage||!eq(s,stage)||away){if(away)stageFixAt=Date.now(); // (at most once a second if it keeps reading back elsewhere)
+ const off8=!!(cur&&stage&&(Math.abs(cur.x-stage.x)>8||Math.abs(cur.y-stage.y)>8||Math.abs(cur.width-stage.width)>8||Math.abs(cur.height-stage.height)>8));if(!off8)awayStrikes=0;
+ // (at most once a second if it keeps reading back elsewhere, and not at all once three tries haven't stuck:
+ // the system may simply not give us that size)
+ const away=off8&&awayStrikes<3&&Date.now()-stageFixAt>1000;
+ if(!stage||!eq(s,stage)||away){if(away){stageFixAt=Date.now();awayStrikes++;stageStats.awayFixes=(stageStats.awayFixes||0)+1;log('stage','window read back at',JSON.stringify(cur),'not',JSON.stringify(stage));}
+  // Moving the window to another screen: the page first shows nothing and says so, then the window
+  // moves and the page draws the pet at its new place. (Moving it straight away would show the old
+  // picture at the new place for a frame or two: a ghost of the pet on the other screen.)
+  if(live&&stage&&!away&&!eq(s,stage)&&handoffOK&&win.isVisible()){handoff(s);return;}
   if(stage&&(s.width!==stage.width||s.height!==stage.height))stageStats.resized++;else if(stage)stageStats.moved++;
   stage={...s};stageStats.setBounds++;if(live)win.setBounds(stage);}
+ if(handing)return; // the page is blank until the hand-off ends; it gets the new place then
  const o={x:bounds.x-stage.x,y:bounds.y-stage.y},sized=bounds.width!==off.w||bounds.height!==off.h;
  if(o.x!==off.x||o.y!==off.y||sized){off={...o,w:bounds.width,h:bounds.height};if(!quiet)send('pet:stage',layout());}
 }
+let handing=null,handoffOK=false,handN=0;
+function handoff(s){
+ if(handing){handing.want=s;return;}
+ const n=++handN;handing={n,want:s};stageStats.handoffs=(stageStats.handoffs||0)+1;
+ send('pet:stage-hold',n);
+ handing.timer=setTimeout(()=>finishHandoff(n,true),150); // a page that doesn't answer still gets moved
+}
+function finishHandoff(n,late){
+ if(!handing||handing.n!==n)return;clearTimeout(handing.timer);handing=null;
+ if(late)stageStats.lateHandoffs=(stageStats.lateHandoffs||0)+1;
+ const s=stageFor(bounds);if(!stage||s.x!==stage.x||s.y!==stage.y||s.width!==stage.width||s.height!==stage.height){
+  if(stage&&(s.width!==stage.width||s.height!==stage.height))stageStats.resized++;else stageStats.moved++;
+  stage={...s};stageStats.setBounds++;stageFixAt=Date.now();if(win&&!win.isDestroyed())win.setBounds(stage);}
+ off={x:bounds.x-stage.x,y:bounds.y-stage.y,w:bounds.width,h:bounds.height};send('pet:stage',{...layout(),reveal:n,at:{x:stage.x,y:stage.y}});
+}
+ipcMain.on('pet:stage-held',(e,n)=>finishHandoff(n,false));
+ipcMain.on('pet:stage-handoff-ok',()=>{handoffOK=true;}); // the page can hold and reveal (sent once it has drawn)
 function place(b,save=true,opt={}){
  bounds={x:Math.round(b.x),y:Math.round(b.y),width:Math.round(b.width),height:Math.round(b.height)};
  setStage(stageFor(bounds),opt.quiet);
@@ -256,7 +300,8 @@ function coverUrl(id){const f=path.join(P.covers,id+'.jpg');return fs.existsSync
 ipcMain.handle('pet:library-save',async(e,list)=>{
  if(!Array.isArray(list))return false;
  const clean=list.filter(x=>x&&safeId(x.id)).slice(0,500).map(x=>({id:x.id,title:String(x.title||'').slice(0,300),artist:String(x.artist||'').slice(0,200),kind:x.kind==='link'?'link':'file',
-  path:x.path?String(x.path):null,url:x.url?String(x.url).slice(0,2000):null,kept:!!x.kept,duration:Number(x.duration)||0,added:Number(x.added)||Date.now(),used:Number(x.used)||0,queue:x.queue||null,qIndex:Number.isFinite(x.qIndex)?x.qIndex:null}));
+  path:x.path?String(x.path):null,url:x.url?String(x.url).slice(0,2000):null,kept:!!x.kept,duration:Number(x.duration)||0,added:Number(x.added)||Date.now(),used:Number(x.used)||0,queue:x.queue||null,qIndex:Number.isFinite(x.qIndex)?x.qIndex:null,
+  thumbs:Array.isArray(x.thumbs)?x.thumbs.filter(u=>typeof u==='string'&&/^https?:\/\//i.test(u)).slice(0,16).map(u=>u.slice(0,2000)):undefined}));
  try{await fsp.writeFile(P.library+'.tmp',JSON.stringify(clean,null,1));await fsp.rename(P.library+'.tmp',P.library);return true;}catch(err){log('library',err.message);return false;}
 });
 ipcMain.handle('pet:cover-save',async(e,id,dataUrl)=>{
@@ -305,9 +350,15 @@ ipcMain.handle('pet:probe',async(e,file)=>{
  fsp.rm(meta,{force:true}).catch(()=>{});fsp.rm(pic,{force:true}).catch(()=>{});
  return out;
 });
-ipcMain.handle('pet:image',async(e,url)=>{
- try{if(!/^https?:\/\//i.test(url))return null;const r=await net.fetch(url);if(!r.ok)return null;const t=r.headers.get('content-type')||'image/jpeg';
-  if(!/^image\//.test(t))return null;const b=Buffer.from(await r.arrayBuffer());if(b.length>8e6)return null;return 'data:'+t+';base64,'+b.toString('base64');}catch{return null;}
+ipcMain.handle('pet:image',(e,url)=>Cover.fetchImage(url,u=>net.fetch(u)));
+// A link's cover: the first of its candidate pictures that really is one ({index, dataUrl} or null).
+ipcMain.handle('pet:cover-from',(e,cands)=>Cover.firstImage((Array.isArray(cands)?cands:[]).slice(0,20),u=>net.fetch(u)));
+// Candidate pictures for a link we only have the address of (records saved before 1.0.8). deep: ask the site.
+ipcMain.handle('pet:link-thumbs',async(e,url,deep)=>{
+ const quick=Cover.thumbCandidates({},url);if(!deep||!/^https?:\/\//i.test(String(url)))return quick;
+ const r=await run(ytdlpPath(),['--no-playlist','-J','--skip-download','--no-warnings','--ignore-config',url],{timeout:60e3});
+ if(r.code!==0){log('link-thumbs',url,r.err.slice(-300));return quick;}
+ try{const j=JSON.parse(r.out);return [...new Set([...Cover.thumbCandidates(j,url),...quick])].slice(0,16);}catch{return quick;}
 });
 
 /* ---------- bundled tools ---------- */
@@ -373,20 +424,15 @@ ipcMain.handle('pet:link-info',async(e,url)=>{
   return {error:friendly(r.err)};
  }
  let j;try{j=JSON.parse(r.out);}catch{return {error:'Sorry, that link wouldn\u2019t play.'};}
- const pick=x=>({url:x.webpage_url||x.url||x.original_url,id:x.id,title:x.track||x.title||'',artist:x.artist||x.uploader||x.channel||'',duration:x.duration||0,thumb:bestThumb(x)});
+ const pick=x=>({url:x.webpage_url||x.url||x.original_url,id:x.id,title:x.track||x.title||'',artist:x.artist||x.uploader||x.channel||'',duration:x.duration||0,thumbs:Cover.thumbCandidates(x,x.webpage_url||x.url)});
  if(j._type==='playlist'&&Array.isArray(j.entries)){
   const entries=j.entries.filter(x=>x&&(x.url||x.webpage_url)&&!/\[(Private|Deleted) video\]/i.test(x.title||'')).map(pick);
   if(!entries.length)return {error:'That list is empty, or nothing in it can be played.'};
   return {kind:'list',title:j.title||'',entries};
  }
  if(j.is_live)return {error:friendly('is live')};
- return {kind:'one',...pick(j),url:j.webpage_url||url};
+ return {kind:'one',...pick(j),thumbs:Cover.thumbCandidates(j,j.webpage_url||url),url:j.webpage_url||url};
 });
-function bestThumb(x){
- if(x.thumbnail)return x.thumbnail;
- const t=Array.isArray(x.thumbnails)?x.thumbnails.filter(t=>t&&t.url):[];if(!t.length)return null;
- t.sort((a,b)=>(b.width||0)*(b.height||0)-(a.width||0)*(a.height||0));return (t.find(z=>(z.width||0)<=1280)||t[0]).url;
-}
 ipcMain.handle('pet:link-fetch',async(e,jobId,url,direct)=>{
  const id=crypto.randomBytes(8).toString('hex'),base=path.join(P.temp,id);
  const progress=(pct,stage)=>send('pet:link-progress',{job:jobId,pct,stage});
@@ -419,7 +465,7 @@ ipcMain.on('pet:log',(e,...a)=>log('page',...a.map(String)));
 
 /* ---------- life cycle ---------- */
 // Tests only (never set in normal use): reach the menus as built, and stand in a fake clipboard.
-if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get pet(){return bounds;},get stage(){return stage;},stageStats};
+if(process.env.DESK_PHONO_TEST)global.__deskPhono={get popup(){return popupMenu;},get popups(){return popups;},get tray(){return trayMenu;},setClipboard(c){clip=c||clipboard;},readLink:()=>readClipboardLink(clip),get win(){return win;},get pet(){return bounds;},get stage(){return stage;},stageStats,stageFor:b=>stageFor(b||bounds),place:b=>place(b,false)};
 app.on('second-instance',()=>{if(win){if(!win.isVisible())toggleShown();}});
 app.whenReady().then(()=>{
  Menu.setApplicationMenu(null);

@@ -155,7 +155,7 @@ let emitT=0;
 function emitSleeves(){clearTimeout(emitT);emitT=setTimeout(()=>{const cur=currentId&&library.get(currentId);
  window.dispatchEvent(new CustomEvent('vinyl-sleeves',{detail:{current:currentId,count:library.size,sleeves:sleeveList(),currentSleeve:cur?sleeveOf(cur):null}}));},30);}
 function persist(){clearTimeout(saveT);saveT=setTimeout(()=>{
- const list=[...library.values()].filter(e=>e.state!=='error'&&(e.kind==='file'||e.file||e.url)).map(e=>({id:e.id,title:e.title,artist:e.artist,kind:e.kind,path:e.kind==='file'?e.path:(e.file||null),url:e.url||null,kept:!!e.kept,duration:e.duration||0,added:e.added,used:e.used,queue:e.queue||null,qIndex:e.qIndex??null}));
+ const list=[...library.values()].filter(e=>e.state!=='error'&&(e.kind==='file'||e.file||e.url)).map(e=>({id:e.id,title:e.title,artist:e.artist,kind:e.kind,path:e.kind==='file'?e.path:(e.file||null),url:e.url||null,kept:!!e.kept,duration:e.duration||0,added:e.added,used:e.used,queue:e.queue||null,qIndex:e.qIndex??null,thumbs:e.thumbs||undefined}));
  D.saveLibrary(list);},400);}
 function flipStack(dir){const before=stackOffset;stackOffset+=dir>0?1:-1;emitSleeves();const all=library.size-(currentId?1:0);
  if(stackOffset!==before&&all>STACK)say(`Records ${Math.max(1,Math.min(stackOffset,all-STACK)+1)}–${Math.min(all,Math.max(0,Math.min(stackOffset,all-STACK))+STACK)} of ${all}`,'hint');}
@@ -201,9 +201,42 @@ async function tagsFor(e,bytes){
  emitSleeves();persist();
 }
 // Cover from a picture URL (a link's thumbnail): centre-cropped square, JPEG, 600 px.
+// A plain grey 120x90 picture is a site's "no picture here" stand-in, not a cover.
+function plainGrey(bmp){
+ if(bmp.width!==120||bmp.height!==90)return false;
+ const c=document.createElement('canvas');c.width=120;c.height=90;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(bmp,0,0);
+ const d=g.getImageData(0,0,120,90).data;for(let i=0;i<d.length;i+=4)if(Math.abs(d[i]-d[i+1])>6||Math.abs(d[i+1]-d[i+2])>6)return false;return true;
+}
 async function squareCover(dataUrl){
- try{const bmp=await createImageBitmap(await (await fetch(dataUrl)).blob());const s=Math.min(bmp.width,bmp.height),n=Math.min(600,s);
+ if(!dataUrl)return null;
+ try{const bmp=await createImageBitmap(await (await fetch(dataUrl)).blob());if(!bmp.width||!bmp.height||plainGrey(bmp)){bmp.close?.();return null;}
+  const s=Math.min(bmp.width,bmp.height),n=Math.min(600,s);
   const c=document.createElement('canvas');c.width=c.height=n;c.getContext('2d').drawImage(bmp,(bmp.width-s)/2,(bmp.height-s)/2,s,s,0,0,n,n);bmp.close?.();return c.toDataURL('image/jpeg',.86);}catch{return null;}
+}
+// Try a link's pictures in turn (biggest first) until one makes a cover. deep: if none do, ask the
+// site for its list of pictures (records saved before their pictures were remembered).
+const coverTried=new Map(),coverBusy=new Map(); // id -> 'quick' | 'deep' tried; id -> a try under way
+async function tryCovers(e,cands){
+ for(let i=0;i<cands.length;){
+  const r=await D.coverFrom(cands.slice(i));if(!r)return false;
+  const c=await squareCover(r.dataUrl);
+  if(c){if(library.get(e.id)!==e)return true;e.cover=c;D.saveCover(e.id,c);emitSleeves();if(e.id===currentId)window.dispatchEvent(new CustomEvent('vinyl-cover',{detail:{id:e.id,cover:c}}));return true;}
+  i+=r.index+1;
+ }
+ return false;
+}
+async function coverFor(e,deep=false){
+ if(!e||e.kind!=='link'||e.cover)return;
+ const busyP=coverBusy.get(e.id);if(busyP){await busyP;return coverFor(e,deep);}
+ const had=coverTried.get(e.id);if(had==='deep'||(had==='quick'&&!deep))return;
+ let done;coverBusy.set(e.id,new Promise(r=>done=r));
+ try{
+  let cands=[...(e.thumbs||[]),...(e.thumb?[e.thumb]:[])];
+  if(e.url)cands=[...new Set([...cands,...await D.linkThumbs(e.url,false)])];
+  if(cands.length&&await tryCovers(e,cands))return;
+  if(deep&&e.url){const more=(await D.linkThumbs(e.url,true)).filter(u=>!cands.includes(u));if(more.length){e.thumbs=[...(e.thumbs||[]),...more].slice(0,16);persist();await tryCovers(e,more);}}
+ }catch(err){D.log('cover',err?.message);}
+ finally{coverTried.set(e.id,deep?'deep':'quick');coverBusy.delete(e.id);done();}
 }
 
 /* ---------- putting a record on ---------- */
@@ -237,6 +270,7 @@ async function play(e,{drop:dropAfter=false}={}){
  if(busy)return false;busy=true;window.petShell?.busyState?.(true);
  try{
   if(e.missing&&e.kind==='file')throw Error('That song isn’t where it used to be. It may have been moved or deleted.');
+  if(e.kind==='link'&&!e.cover)coverFor(e,true);
   if(e.kind==='link'&&!e.file){await fetchEntry(e);if(!e.file)return false;}
   say(`Putting on “${titleOf(e)}”…`,'busy');
   const buf=await decodeEntry(e);
@@ -293,12 +327,12 @@ async function playLink(text){
   const qid=newId(),ents=info.entries;say(`A list of ${ents.length}: they’ll arrive one by one${autoNext?' and play in turn':''}.`,'hint');
   const base=++useCounter;let first=null;
   ents.forEach((x,i)=>{const known=[...library.values()].find(e=>e.url===x.url);if(known)return;
-   const e=add({kind:'link',url:x.url,title:x.title,artist:x.artist,duration:x.duration,thumb:x.thumb,state:'waiting',queue:qid,qIndex:i,used:base-i*1e-3});first??=e;});
+   const e=add({kind:'link',url:x.url,title:x.title,artist:x.artist,duration:x.duration,thumbs:x.thumbs||[],state:'waiting',queue:qid,qIndex:i,used:base-i*1e-3});first??=e;});
   useCounter+=1;emitSleeves();
   if(first){await fetchEntry(first);if(first.file)await play(first,{drop:true});}
   return;
  }
- Object.assign(holder,{title:info.title||'',artist:info.artist||'',duration:info.duration||0,thumb:info.thumb||null,direct:info.kind==='direct'});
+ Object.assign(holder,{title:info.title||'',artist:info.artist||'',duration:info.duration||0,thumbs:info.thumbs||[],direct:info.kind==='direct'});
  await fetchEntry(holder);
  if(holder.file)await play(holder,{drop:true});
 }
@@ -308,7 +342,7 @@ async function fetchEntry(e){
  fetching.add(e.id);e.state='fetching';e.pct=0;emitSleeves();
  const job=++jobN;progressFor.set(job,e);
  try{
-  if(e.thumb&&!e.cover){D.image(e.thumb).then(squareCover).then(c=>{if(c){e.cover=c;D.saveCover(e.id,c);emitSleeves();}});}
+  if(!e.cover)coverFor(e,true);
   const r=await D.linkFetch(job,e.url,!!e.direct);
   if(r.error){e.state='error';e.error=r.error;emitSleeves();say(r.error,'error');setTimeout(()=>{if(library.get(e.id)===e&&e.state==='error'&&e.id!==currentId){library.delete(e.id);emitSleeves();}},8000);return;}
   e.file=r.file;e.state='ready';if(e.kept){const f=await D.keep(e.file,true);if(f)e.file=f;}
@@ -401,6 +435,8 @@ setInterval(()=>{if(record){if(down&&!state.grabbed&&time()>=duration()-.01)fini
   if(e.kind==='link'){e.file=x.path||null;e.state=e.file&&!x.missing?'ready':(x.queue&&!x.kept?'waiting':'ready');if(x.missing||!e.file){e.file=null;}}
   library.set(e.id,e);
  }
+ // link records saved without a cover (a picture that failed before 1.0.8): try their pictures again, one at a time
+ (async()=>{for(const e of ordered())if(e.kind==='link'&&!e.cover&&library.get(e.id)===e)await coverFor(e,false);})();
  // temp records whose files were cleaned away are fetched again when played; playlists past the cap are trimmed
  trimTemp();emitSleeves();
  D.tempSweep([...library.values()].map(e=>e.file).filter(Boolean));
