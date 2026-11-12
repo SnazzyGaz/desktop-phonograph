@@ -59,7 +59,7 @@ async function sleeveItem(label){for(let i=0;i<3;i++){await until(()=>!window.vi
  ok(false,`“${label}” is in a sleeve’s menu`);return null;}
 const until=async(f,ms=8000)=>{const t0=Date.now();while(Date.now()-t0<ms){if(await R(f))return true;await wait(150);}return false;};
 const mainUntil=async(f,ms=5000)=>{const t0=Date.now();while(Date.now()-t0<ms){if(await M(f))return true;await wait(150);}return false;};
-const st=()=>R(()=>({down:window.vinyl.down,rpm:window.vinyl.rpm,vol:window.vinyl.volume,muted:window.vinyl.muted,insp:window.vinylView.inspect.active,toy:window.vinylView.toy,auto:window.vinyl.autoNext,n:window.vinyl.libraryCount,cur:window.vinyl.currentId,shuffle:window.vinyl.shuffle,repeat:window.vinyl.repeat,fan:window.vinylView.fan.on}));
+const st=()=>R(()=>({down:window.vinyl.down,rpm:window.vinyl.rpm,vol:window.vinyl.volume,muted:window.vinyl.muted,toy:window.vinylView.toy,auto:window.vinyl.autoNext,n:window.vinyl.libraryCount,cur:window.vinyl.currentId,shuffle:window.vinyl.shuffle,repeat:window.vinyl.repeat,fan:window.vinylView.fan.on}));
 const fileUntil=async(f,ms=4000)=>{const t0=Date.now();while(Date.now()-t0<ms){if(f(settingsFile()))return true;await wait(150);}return false;};
 const settingsFile=()=>{try{return JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));}catch{return {};}};
 console.log(NATIVE?'  (popup items picked through UI Automation on the native menu)':'  (items fired through each menu’s own command dispatch)');
@@ -75,8 +75,7 @@ r0=(await st()).rpm;await popupItem('Speed>A little slower');ok((await st()).rpm
 await popupItem('Speed>78 rpm');await popupItem('Speed>Back to normal speed');ok(Math.abs((await st()).rpm-cut)<.2,`“Speed>Back to normal speed” → ${(await st()).rpm.toFixed(1)}`);
 await popupItem('Volume>25%');ok(Math.abs((await st()).vol-.25)<.01,'“Volume>25%”');await popupItem('Volume>Mute');ok((await st()).muted===true&&await fileUntil(x=>x.muted===true),'“Volume>Mute” mutes (and remembers)');
 await popupItem('Volume>50%');{const x=await st();ok(Math.abs(x.vol-.5)<.01&&!x.muted,'“Volume>50%” unmutes at 50%');}await popupItem('Volume>100%');await popupItem('Volume>75%');ok(Math.abs((await st()).vol-.75)<.01,'“Volume>75%”, “Volume>100%”');
-await popupItem('Look closely at the record');ok(await until(()=>window.vinylView.inspect.active),'“Look closely at the record” lifts it out');
-await page.keyboard.press('Escape');ok(await until(()=>!window.vinylView.inspect.active),'Esc puts it back');await wait(1200);
+if(await openPopup()){ok(!(await labelsOf('popup')).some(l=>/look closely/i.test(l)),'no “Look closely at the record” item');await M(()=>global.__deskPhono.popup?.closePopup());await wait(400);}
 // the transport: three more records, then Next / Previous / Shuffle / Repeat / the fan
 {const extra=['third song.mp3','fourth song.mp3','fifth song.mp3'].map(n=>path.join(data,n));for(const f of extra)fs.copyFileSync(song,f);
  const c0=await R(()=>window.vinyl.currentId);await R(p=>window.vinyl.openPaths(p),extra);await until(()=>window.vinyl.libraryCount>=4,30000);await until(new Function('return !!window.vinyl.buffer&&window.vinyl.currentId!=='+JSON.stringify(c0)),60000);await wait(2500);

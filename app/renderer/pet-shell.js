@@ -6,7 +6,7 @@
    solid pixels clicks through.
    Gestures: left-drag on the body/base moves the window (arm, record, sleeves, toy keep
    their own clicks first), scroll resizes, right-click opens the menu. The machine stays in
-   one fixed three-quarter pose; only Inspect (double-click the record) turns and zooms. */
+   one fixed three-quarter pose. */
 (() => {
 'use strict';
 const D=window.desk,V=()=>window.vinylView,P=()=>window.vinyl;
@@ -49,7 +49,7 @@ function solidAt(x,y){
 }
 function setSolid(s){if(s!==solid){solid=s;D.solid(s);}}
 function test(){hitT=0;if(holding||lastX<0){return;}const v=V();
- if(v?.inspect?.active||v?.fanActive){const b=v.renderer.domElement.getBoundingClientRect();setSolid(lastX>=b.left&&lastX<b.right&&lastY>=b.top&&lastY<b.bottom);return;} // inspecting or fanned: the canvas round the pet takes the clicks (a click beside the record puts it back), the rest of the screen does not
+ if(v?.fanActive){const b=v.renderer.domElement.getBoundingClientRect();setSolid(lastX>=b.left&&lastX<b.right&&lastY>=b.top&&lastY<b.bottom);return;} // fanned: the canvas round the pet takes the clicks (a click beside the record puts it back), the rest of the screen does not
  setSolid(solidAt(lastX,lastY));}
 document.addEventListener('mousemove',e=>{lastX=e.clientX;lastY=e.clientY;if(!hitT)hitT=setTimeout(test,30);},{passive:true});
 document.addEventListener('mouseleave',()=>{lastX=-1;if(!holding)setSolid(false);});
@@ -105,7 +105,6 @@ D.onCommand(async c=>{
   case 'drop':p.drop()?.catch?.(()=>{});break;
   case 'speed':if(c.normal)p.setSpeed(p.record.metadata.rpm_cut);else if(c.nudge)p.setSpeed(p.rpm+c.nudge*1.5);else p.setSpeed(c.rpm);say(`${p.rpm.toFixed(1).replace(/\.0$/,'')} rpm`,'hint');break;
   case 'volume':p.setVolume(c.value);say(c.value?`Volume ${Math.round(c.value*100)}%`:'Silent','hint');break;
-  case 'inspect':if(!v.inspect.active)v.beginInspection();break;
   case 'keep':p.keepCurrent();break;
   case 'forget':p.forget(c.id);break;
   case 'autoNext':p.autoNext=c.on;say(c.on?'The next one will play by itself':'It will stop after each record','hint');break;

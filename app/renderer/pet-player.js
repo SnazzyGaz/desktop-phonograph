@@ -2,14 +2,13 @@
    this computer or from a web link. The needle / scratch / seek / speed mechanics are
    carried over unchanged from the Vinyl Sim player (player.js); what is new is the
    loading: the song is decoded whole into memory (so a scratch can run anywhere in it),
-   its record is sized from its length (vinyl-core parameters()) and its grooves are
-   imitated from its own sound (the view's playback rebuild), so loud and quiet passages
-   and the run-out show. The library of sleeves lives on disk (main process). */
+   its record is sized from its length (vinyl-core parameters()); its groove look is a
+   cheap fake drawn by the vinyl shader over that span. The library of sleeves lives on disk (main process). */
 (() => {
 'use strict';
 const D=window.desk,Core=window.VinylCore,Tags=window.VinylTags;
 let record=null, ctx=null, buffer=null, reverseBuffer=null, source=null, gain=null, panner=null, down=false;
-let position=0, audioAnchor=0, rpm=45, busy=false, inspecting=false, vol=.8, muted=false;
+let position=0, audioAnchor=0, rpm=45, busy=false, vol=.8, muted=false;
 let lastGrabAngle=0, lastGrabTime=0, scratchUsingReverse=false, scratchStart=0, scratchAbsRate=0;
 const SCRATCH_SETTLE_MS=350; let lastScratchMotion=-1e9;
 const state={angle:Math.PI*.2,rotation:0,dragging:false,grabbed:false};
@@ -53,7 +52,7 @@ function reversed(){
  return reverseBuffer;
 }
 async function drop(t=position){
- if(!record||!buffer||state.grabbed||inspecting)return; await ensureAudio();if(inspecting)return;silence();
+ if(!record||!buffer||state.grabbed)return; await ensureAudio();silence();
  position=clampTime(t);
  source=ctx.createBufferSource();source.buffer=buffer;source.playbackRate.value=rpm/record.metadata.rpm_cut;source.connect(gain);
  audioAnchor=ctx.currentTime;down=true;source.start(0,position);
@@ -87,7 +86,7 @@ function seekToXY(x,y){
 }
 function wrapAngle(d){while(d>Math.PI)d-=Math.PI*2;while(d<-Math.PI)d+=Math.PI*2;return d;}
 function grabStart(x,y){
- if(!record||inspecting)return;
+ if(!record)return;
  const r=Math.hypot(x,y),m=record.metadata;
  if(r>m.disc_radius_mm+1)return;
  const wasPlaying=down;position=time();silence();ensureAudio();
@@ -166,7 +165,8 @@ function persist(){clearTimeout(saveT);saveT=setTimeout(()=>{
  D.saveLibrary(list);},400);}
 function flipStack(dir){const before=stackOffset;stackOffset+=dir>0?1:-1;emitSleeves();const all=library.size-(currentId?1:0);
  if(stackOffset!==before&&all>STACK)say(`Records ${Math.max(1,Math.min(stackOffset,all-STACK)+1)}–${Math.min(all,Math.max(0,Math.min(stackOffset,all-STACK))+STACK)} of ${all}`,'hint');}
-function add(e){e.id??=newId();e.added??=Date.now();e.used??=++useCounter;library.set(e.id,e);stackOffset=0;emitSleeves();return e;}
+let lastAdded=0; // songs added together keep the order they came in (not a random id tie-break)
+function add(e){e.id??=newId();e.added??=(lastAdded=Math.max(Date.now(),lastAdded+1));e.used??=++useCounter;library.set(e.id,e);stackOffset=0;emitSleeves();return e;}
 // Temporary records (fetched, not kept): only the newest TEMP_CAP stay; the oldest go, files and all.
 function trimTemp(){
  const cur=library.get(currentId),protect=new Set([currentId,...queueAfter(cur,2).map(x=>x.id),...upNext,planned].filter(Boolean));
@@ -275,7 +275,7 @@ function noteMounted(id){
  played=Order.notePlayed({played},id,seq().length);upNext=upNext.filter(x=>x!==id);planned=null;
 }
 function mount(e,buf){
- inspecting=false;silence();down=false;state.grabbed=false;state.dragging=false;scratchAbsRate=0;
+ silence();down=false;state.grabbed=false;state.dragging=false;scratchAbsRate=0;
  const prev=currentId?library.get(currentId):null;if(prev){prev.used=++useCounter;if(prev.id!==e.id)prev.buffer=null;} // only the record on the turntable keeps its sound in memory
  record=recordFor(e,buf);buffer=buf;reverseBuffer=null;currentId=e.id;e.used=++useCounter;
  position=0;state.rotation=0;rpm=record.metadata.rpm_cut;
@@ -302,8 +302,8 @@ async function play(e,{drop:dropAfter=false}={}){
   return true;
  }catch(err){D.log('play',err?.message);e.buffer=null;if(err?.tooLong){refuseLong(e);return false;}say(err?.message||'Sorry, that one wouldn’t play.','error');return false;}
  finally{busy=false;window.petShell?.busyState?.(false);
-  // (still "being put on" for a few seconds after it is on: the record's grooves are drawn then)
-  if(tok)setTimeout(()=>{if(loadTok===tok)D.loading(null);},mounted?6000:0);}
+  // (still "being put on" while it flies onto the platter)
+  if(tok)setTimeout(()=>{if(loadTok===tok)D.loading(null);},mounted?3000:0);}
 }
 function swapTo(id){const e=library.get(id);if(!e||id===currentId)return false;
  if(e.state==='fetching'){say('Still getting that one ready…','hint');return false;}
@@ -439,7 +439,7 @@ function setMuted(m){muted=!!m;if(gain)gain.gain.value=muted?0:vol;D.set({muted}
 
 window.vinyl={get record(){return record;},get state(){return state;},get down(){return down;},get buffer(){return buffer;},time,lift,drop,grabStart,grabMove,grabEnd,grabTick,setListener,
  place(x,y,release=false){if(!record)return;if(release){grabEnd();return;}grabStart(x,y);},
- get inspecting(){return inspecting;},setInspecting(value){if(value&&!inspecting)lift();inspecting=!!value;},
+
  get volume(){return vol;},setVolume,get muted(){return muted;},setMuted,get rpm(){return rpm;},setSpeed(v){if(!record)return;speed(v);},
  get sources(){return {vector:false,png:false,both:false};},get source(){return record?'playback':null;},setSource(){},
  swapTo,sleeves:sleeveList,currentSleeve:()=>{const e=currentId&&library.get(currentId);return e?sleeveOf(e):null;},get currentId(){return currentId;},

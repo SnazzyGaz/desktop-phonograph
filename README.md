@@ -26,9 +26,8 @@ across your screens, scratch the record, and lift the needle to stop.
 - **Real record behaviour.** Lower the arm to play, lift it to stop. Grab the record to
   scratch it backwards and forwards anywhere in the song. Switch between 33⅓, 45 and
   78 rpm, or nudge the speed up and down.
-- **Grooves from the music.** Each record is sized from the song's length, and its
-  grooves are drawn from the song's own sound, so loud and quiet passages and the
-  run-out show on the vinyl. Double-click the record to lift it off and look closely.
+- **Records sized to the song.** A short song gets a 7-inch, a longer one a 12-inch, and
+  the grooved band, run-out and lead-in sit where the song's spiral would.
 - **A crate of sleeves.** Point at a sleeve and its name appears. Click a sleeve to slide
   the record half out, click again to play it. Double-click the crate to fan every
   record out and pick one.
@@ -53,7 +52,6 @@ across your screens, scratch the record, and lift the needle to stop.
 | Click a sleeve, then click it again | slides the record out, then plays it |
 | Right-click a sleeve | *Play this record now*, *Play next* or *Put this record away* |
 | Double-click the crate | fans all the records out: click one to play it; Esc or a click elsewhere puts them back |
-| Double-click the record | look at it closely: drag to turn it, scroll to bring it closer; Esc or click to put it back |
 | Space · ↑ ↓ · [ ] | play/pause · volume · speed |
 | Click the tray icon | hide or show the phonograph |
 
@@ -74,16 +72,15 @@ survive updates. Deleting that folder resets everything.
 ## Under the hood
 
 Desk Phonograph is an [Electron](https://www.electronjs.org/) app with a
-[three.js](https://threejs.org/) scene. The phonograph, the record, the groove rendering
-and the needle/scratch mechanics come from **Vinyl Sim**, a browser vinyl simulator by
+[three.js](https://threejs.org/) scene. The phonograph, the record and the needle/scratch mechanics come from **Vinyl Sim**, a browser vinyl simulator by
 the same author; this project wraps them up as a desktop pet.
 
 ### Main process (`app/main.js`)
 
 - **The window ("stage").** The window is transparent, frameless, always on top and
-  hidden from the taskbar. Rather than being the size of the phonograph, it covers the
+  hidden from the taskbar and Alt+Tab. Rather than being the size of the phonograph, it covers the
   work area of the screen the phonograph is on, and the page draws the pet wherever it
-  is inside that. This means resizing, fanning records, inspecting and dragging around
+  is inside that. This means resizing, fanning records and dragging around
   one screen never move or resize the OS window, so nothing jumps or flashes. Only
   crossing to another screen moves the window, using a hand-off: the page blanks, the
   window moves, and the page redraws the pet at its new spot, so you never see a ghost
@@ -122,13 +119,12 @@ the same author; this project wraps them up as a desktop pet.
   scratch can reach anywhere in it), played through Web Audio with a reversed copy for
   backwards scratching, and placed in 3D at the horn's mouth.
 - `static/view.js`: the three.js scene: cabinet, horn, arm, crate, sleeves, front keys,
-  knob, Now Playing card, fan and inspect views, and the hula girl and shiba.
-- `static/vinyl-core.js`: a JavaScript port of Vinyl Sim's cutter maths. It sizes each
-  record from the song's length and works out the groove spiral.
-- `static/groove-surface-worker.js`: a Web Worker that builds the record's groove
-  surface texture from the song's own sound (an imitation of a real cut groove, rebuilt
-  from the playback audio), which the vinyl shader reads so loud and quiet passages and
-  the run-out catch the light.
+  knob, Now Playing card, the fan of records, and the hula girl and shiba. The record's
+  grooves are a cheap fake in the vinyl shader: a radial sheen across a groove band, a
+  matte run-out and a few faint loud/quiet bands. At desk-pet size real grooves are far
+  finer than a pixel, so nothing is generated from the audio.
+- `static/vinyl-core.js`: sizes each record from the song's length (7- or 12-inch,
+  45 or 33⅓ rpm) and works out the spiral the needle follows.
 - `play-order.js`: shuffle, repeat and what plays next.
 
 ### Covers for web links (`app/cover.js`)

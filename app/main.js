@@ -73,7 +73,7 @@ function firstBounds(){
 }
 let bounds=null; // the pet's own rect on screen (DIP); what is saved, sized and kept on screen
 /* The stage: the window covers the work area of the screen the pet is on (transparent; empty pixels
-   click through) and the page draws the pet where it is. So scroll-to-size, the fan, Inspect, the
+   click through) and the page draws the pet where it is. So scroll-to-size, the fan, the
    sleeves and dragging within a screen never resize or move the window (nothing can jump or blank);
    only crossing to another screen moves it. A stage exactly the size of the whole monitor (taskbar
    hidden) is kept 1 px smaller so Windows never takes it for a full-screen app. */
@@ -198,9 +198,9 @@ ipcMain.on('pet:solid',(e,solid)=>{if(!win)return;const ig=!solid;if(ig!==ignori
 
 /* ---------- moving: Beacons-style drag + fling ---------- */
 let mv=null,fling=null;
-// Inspecting or fanning: no window drags (the page draws in the headroom round the pet).
+// The fan open: no window drags (the page draws in the headroom round the pet).
 let room=null;
-ipcMain.handle('pet:inspect-room',(e,step)=>{ // the page uses its headroom; here it only stops drags meanwhile
+ipcMain.handle('pet:room',(e,step)=>{ // the page uses its headroom; here it only stops drags meanwhile
  if(step==='grow'){room=true;stopFling();mv=null;}else if(step==='shrink')room=null;
  return true;
 });
@@ -300,7 +300,6 @@ ipcMain.handle('pet:menu',(e,st)=>{
    {label:'A little faster',click:()=>send('pet:command',{cmd:'speed',nudge:1})},
    {label:'A little slower',click:()=>send('pet:command',{cmd:'speed',nudge:-1})},
    {label:'Back to normal speed',click:()=>send('pet:command',{cmd:'speed',normal:true})}]},
-  {label:'Look closely at the record',enabled:!!st.record,click:()=>send('pet:command',{cmd:'inspect'})},
   {type:'separator'},
   {label:'Keep this record',type:'checkbox',visible:!!st.canKeep,checked:!!st.kept,click:()=>send('pet:command',{cmd:'keep'})},
   {label:'Put this record away',visible:!!st.sleeve,click:()=>send('pet:command',{cmd:'forget',id:st.sleeve})},

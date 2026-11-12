@@ -27,7 +27,7 @@ ok(rec.dur>1,`song decoded (${rec.dur.toFixed(1)} s, ${rec.R*2} mm record, "${re
 // transparency + hit test: corners are empty, the middle of the machine is solid
 const hits=await page.evaluate(()=>{const c=window.vinylView.renderer.domElement.getBoundingClientRect(),h=window.petShell.hit;return {corner:h(c.left+3,c.top+3),corner2:h(c.right-3,c.bottom-3),mid:h(c.left+c.width*.5,c.top+c.height*.62),outside:h(Math.max(2,c.left-40),Math.max(2,c.top-40))};});
 ok(!hits.corner&&!hits.corner2&&!hits.outside,'corners and the empty screen around the pet click through');ok(hits.mid,'the machine is solid under the cursor');
-// the pose is locked: no orbiting outside Inspect, sharpness capped, a small shadow map
+// the pose is locked: no orbiting, sharpness capped, a small shadow map
 const lock=await page.evaluate(()=>{const v=window.vinylView;return {rotate:v.controls.enableRotate,dpr:v.renderer.getPixelRatio(),dev:devicePixelRatio,shadow:v.shadowSize};});
 ok(lock.rotate===false,'the machine cannot be turned (right-drag / Alt+drag do nothing)');
 ok(lock.dpr<=Math.min(lock.dev,1.25)+1e-6,`pixel ratio capped in the normal view (${lock.dpr} of ${lock.dev})`);ok(lock.shadow===1024,`shadow map ${lock.shadow}²`);
@@ -51,13 +51,8 @@ await page.evaluate(()=>window.vinyl.lift());await page.waitForTimeout(12000);aw
 const idleFrames=await fps();
 console.log('  idle draw reasons:',await page.evaluate(()=>new Promise(res=>{const seen={};const t=setInterval(()=>{const k=window.vinylView.lastDraw||'-';seen[k]=(seen[k]||0)+1;},50);setTimeout(()=>{clearInterval(t);res(JSON.stringify(seen));},1500);})));
 ok(playFrames<=70,`playing draws ≤ ~30 fps (${playFrames/2} fps)`);ok(idleFrames<=4,`idle draws almost nothing (${idleFrames/2} fps)`);
-// inspect, then put it back
-await page.evaluate(()=>window.vinylView.beginInspection());await page.waitForFunction(()=>window.vinylView.inspect.phase==='held',null,{timeout:30000}).catch(()=>{});await page.waitForTimeout(800);
-ok(await page.evaluate(()=>window.vinylView.inspect.phase==='held'),'inspect lifts the record');
-{const i=await page.evaluate(()=>({rotate:window.vinylView.controls.enableRotate,zoom:window.vinylView.controls.enableZoom,dpr:window.vinylView.renderer.getPixelRatio(),dev:devicePixelRatio}));ok(i.rotate===false&&i.zoom!==false,'inspect zooms but the player itself never orbits (right-drag turns the record: test/inspect-zoom.mjs)');ok(Math.abs(i.dpr-Math.min(i.dev,2))<1e-6,`full sharpness in inspect (${i.dpr})`);}
-await still({path:path.join(out,'pet-inspect.png'),omitBackground:true,timeout:120000});
-await page.keyboard.press('Escape');await page.waitForFunction(()=>!window.vinylView.inspect.active,null,{timeout:30000}).catch(()=>{});
-ok(await page.evaluate(()=>!window.vinylView.inspect.active),'Esc puts it back');
+// no Inspect any more: the record is never lifted off for a close-up, and nothing builds groove maps
+ok(await page.evaluate(()=>window.vinylView.inspect===undefined&&window.vinylView.beginInspection===undefined&&window.vinylView.grooveSurface===undefined),'no inspect mode and no groove-surface builder');
 ok(await page.evaluate(()=>window.vinylView.controls.enableRotate===false&&window.vinylView.renderer.getPixelRatio()<=Math.min(devicePixelRatio,1.25)+1e-6),'back to the locked pose and capped sharpness');
 // library persists
 await page.waitForTimeout(800);

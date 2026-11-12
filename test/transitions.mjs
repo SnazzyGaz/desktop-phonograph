@@ -1,5 +1,5 @@
 // Every mode change keeps the pet still and never flashes: the crate fan (open/close), record
-// Inspect (in/out), sleeve pop (click) and tuck (Esc), the sleeve hover title, playing a popped
+// sleeve pop (click) and tuck (Esc), the sleeve hover title, playing a popped
 // sleeve, and the dancer swap. Linux + xvfb + ffmpeg: records the X screen at 60 fps and
 // checks every frame: the machine (around the volume knob, or the crate's front-left while a
 // held record covers the knob) is where it was within 1 px, the pet is
@@ -40,9 +40,7 @@ await page.mouse.move(2,2);await wait(1500);
 mark('fan open');await page.mouse.dblclick(Math.round(crate.x),Math.round(crate.y));await page.mouse.move(2,2);
 await page.waitForFunction(()=>window.vinylView.fan.on&&window.vinylView.fan.cards.length&&!window.vinylView.fan.cards.some(c=>c.moving),null,{timeout:30000}).catch(()=>{});await wait(700);
 mark('fan close');await page.keyboard.press('Escape');await page.waitForFunction(()=>!window.vinylView.fan.on,null,{timeout:20000}).catch(()=>{});await wait(900);
-mark('inspect in');await page.mouse.dblclick(Math.round(disc.x),Math.round(disc.y));
-await page.waitForFunction(()=>window.vinylView.inspect?.phase==='held',null,{timeout:30000}).catch(()=>{});await wait(900);
-mark('inspect out');await page.keyboard.press('Escape');await page.waitForFunction(()=>!window.vinylView.inspect?.active,null,{timeout:30000}).catch(()=>{});await page.mouse.move(2,2);await wait(1200);
+mark('record dblclick');await page.mouse.dblclick(Math.round(disc.x),Math.round(disc.y));await page.mouse.move(2,2);await wait(900); // no Inspect: nothing lifts
 const sl=await sleeveAt();ok(!!sl,'a sleeve to pop');
 mark('sleeve hover');await page.mouse.move(sl.x,sl.y);await wait(900);
 mark('sleeve pop');await page.mouse.click(sl.x,sl.y);await wait(1400);

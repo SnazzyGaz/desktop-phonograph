@@ -9,7 +9,7 @@ import {createShiba} from './shiba.js';
    Physically based materials painted procedurally (materials.js), image-based
    lighting baked from the room, one shadowed window key, and tiered post
    (post.js). Frames are drawn on demand: nothing moving => nothing rendered.
-   The camera is the viewer's: swapping records, inspecting and returning never
+   The camera is the viewer's: swapping records never
    reset it; only Reset view does, and every move is eased. */
 const view=document.getElementById('view');
 // Desk pet (Desk Phonograph): no room, a see-through window, the page decides what clicks through.
@@ -27,7 +27,6 @@ const camera=new THREE.PerspectiveCamera(38,1,2,7000);camera.up.set(0,0,1);camer
 const controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,0,2.5);controls.enableDamping=true;controls.dampingFactor=.075;controls.rotateSpeed=.7;controls.enablePan=false;
 controls.touches={ONE:null,TWO:THREE.TOUCH.DOLLY_ROTATE};controls.mouseButtons={LEFT:null,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.ROTATE};
 const V3=THREE.Vector3;
-const inspect={active:false,phase:'idle',elapsed:0,drag:null};
 const ORBIT_SWING=1.2;
 let R=90,drag=false,version=0,builds=0;
 
@@ -49,7 +48,7 @@ function machineClamps(){
  controls.enablePan=false;controls.zoomToCursor=false;controls.minPolarAngle=Math.PI*.2;controls.maxPolarAngle=Math.PI*.47;
  const d=defaultPose(),az=azimuthOf(d.pos,d.target);controls.minAzimuthAngle=az-ORBIT_SWING;controls.maxAzimuthAngle=az+ORBIT_SWING;
  controls.minDistance=R*3.5;controls.maxDistance=R*(ROOM?8.5:7.5);
- if(PET){controls.enableRotate=false;post.setDprCap?.(1.25);post.setLite?.(false);controls.minPolarAngle=Math.PI*.12;controls.maxPolarAngle=Math.PI*.5;const pd=defaultPose(),d=pd.pos.distanceTo(pd.target);controls.minDistance=d*.998;controls.maxDistance=d*1.002;} // a band, not a point: OrbitControls sees a 1-ulp clamp as a zoom every frame
+ if(PET){controls.enableRotate=false;post.setDprCap?.(1.25);controls.minPolarAngle=Math.PI*.12;controls.maxPolarAngle=Math.PI*.5;const pd=defaultPose(),d=pd.pos.distanceTo(pd.target);controls.minDistance=d*.998;controls.maxDistance=d*1.002;} // a band, not a point: OrbitControls sees a 1-ulp clamp as a zoom every frame
 }
 let camTween=null;
 function flyTo(pos,target,dur=.85,done){
@@ -101,14 +100,13 @@ function keepInRoom(){
 }
 const keepBelowCeiling=keepInRoom; // alias kept for older callers
 function resetView(){
- if(inspect.active){returnRecord();return;}
  machineClamps();const d=defaultPose();flyTo(d.pos,d.target,.9);
 }
 function snapToDefault(){machineClamps();const d=defaultPose();camera.position.copy(d.pos);controls.target.copy(d.target);camera.lookAt(d.target);stopControlMomentum();}
 document.getElementById('resetView')?.addEventListener('click',resetView);
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
 // Cancel a flight the moment the viewer takes the camera.
-renderer.domElement.addEventListener('pointerdown',e=>{if(e.button!==0&&camTween&&!inspect.active){camTween=null;}},{capture:true});
+renderer.domElement.addEventListener('pointerdown',e=>{if(e.button!==0&&camTween){camTween=null;}},{capture:true});
 /* Smooth wheel zoom. Each notch sets a new target distance (a fixed 11% per notch, so it is
    repeatable: five notches in and five out lands exactly where you started); the camera then
    glides there on a critically damped spring in log-distance, so notches in quick succession
@@ -119,9 +117,9 @@ const zoom={goal:null,vel:0,x:0,y:0};
 const camDist=()=>camera.position.distanceTo(controls.target);
 controls._handleMouseWheel=function(e){
  if(PET&&fan.on){fanScroll(Math.sign(e.deltaY));return;}
-if(PET&&!inspect.active){const pk=pickAt(e);if(pk?.kind==='knob'){knobWheel(e);return;} // over the knob the wheel turns it, it doesn't size the pet
+if(PET){const pk=pickAt(e);if(pk?.kind==='knob'){knobWheel(e);return;} // over the knob the wheel turns it, it doesn't size the pet
 if(pk?.kind==='sleeve'&&window.vinyl?.flipStack){window.vinyl.flipStack(Math.sign(e.deltaY));return;}zoomWheel(e);return;}
- if(camTween&&!inspect.active)camTween=null;
+ if(camTween)camTween=null;
  const lo=Math.log(controls.minDistance),hi=Math.log(controls.maxDistance);
  if(zoom.goal===null){zoom.goal=Math.log(camDist());zoom.vel=0;}
  zoom.goal=Math.max(lo,Math.min(hi,zoom.goal+Math.sign(e.deltaY)*Math.min(3,Math.abs(e.deltaY)/100)*ZOOM_NOTCH));
@@ -148,9 +146,7 @@ key.shadow.mapSize.set(PET?1024:2048,PET?1024:2048);Object.assign(key.shadow.cam
 const frontFill=new THREE.DirectionalLight(0xffe2c0,.35);frontFill.name='room-bounce';frontFill.position.set(-200,-520,260);scene.add(frontFill);
 const graze=new THREE.DirectionalLight(0xffe6c0,.55);graze.name='groove-graze';graze.position.set(-160,300,40);scene.add(graze);
 /* The light set never changes after start-up: adding, removing or hiding a light
-   recompiles every shader in the scene (a visible hitch), and an extra light for
-   inspection would also relight the room as the record turns. Inspection relies
-   on the window, the room reflection and a stronger reflection on the vinyl only. */
+   recompiles every shader in the scene (a visible hitch). */
 
 /* ---------- record ---------- */
 const disc=new THREE.Group();disc.name='disc';scene.add(disc);
@@ -209,27 +205,20 @@ function placeTonearm(tipX,tipY,tipZ,down){
 const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();
 function clearDisc(){while(disc.children.length){const c=disc.children[0];disc.remove(c);disposeTree(c);}}
 
-/* Vinyl: the record's own groove surface, true to form. The cut is one V groove (the metadata's
-   depth and width) round the spiral; where its centre sits along every turn comes from the record
-   itself (grooveSurface: the PNG's pixels, else the vector master, else a rebuild from playback),
-   as moments per turn x 1/A revolution with a 1-D mip chain. Per pixel the shader finds the groove
-   under it, box-filters the exact V profile over the pixel's footprint (widened by how far the
-   groove wanders inside it) and splits what it sees in two lobes, as a real record reflects:
-   the flat lands, a mirror (the clearcoat lobe), and the walls, at their mean slope with the slope
-   spread they hide (radial -> anisotropy, along the groove -> roughness; LEAN/Toksvig style).
-   Close up, pitch, walls and wiggle are drawn as they are; far off they become the radial sheen,
-   brighter where the music is quiet, with no moire at any distance. Land, lead-in and run-out
-   from the spiral metadata as before. */
+/* Vinyl: a fake groove look. At the pet's size the real grooves are far finer than a pixel, so the
+   record only needs how grooves look from a little way off: a radial sheen (the groove walls as an
+   anisotropic lobe across the radius, the flat lands as a clearcoat mirror), a matte run-out, a
+   bright lead-in and a few faint bands where the "music" gets louder or quieter. Nothing comes from
+   the song itself except the band seed and the spiral's extent (from the record's length), so it
+   costs a handful of shader instructions and nothing at load time. */
 function grooveUniforms(m){
  const label=m?.label_radius_mm??27,rStart=m?.r_start_mm??(R-4),pitch=m?.pitch_mm??.6;
  const turns=m?(m.lead_in_turns+m.duration_sec*m.rpm_cut/60+m.lead_out_turns):(rStart-label-6)/pitch;
+ const seed=((m?.duration_sec||0)*7.31)%6.2832;
  return {uRStart:{value:rStart},uREnd:{value:Math.max(label+2,rStart-pitch*turns)},uPitch:{value:pitch},uLabel:{value:label},
-  uGroove:{value:NO_WANDER},uGA:{value:1},uGT:{value:1},uGEnd:{value:Number.isFinite(turns)&&m?turns:1e6},
-  uGHw:{value:m?.groove_width_mm?m.groove_width_mm/2:pitch*.25},uGDepth:{value:m?.groove_depth_mm??.3}};
+  uGHw:{value:m?.groove_width_mm?m.groove_width_mm/2:pitch*.25},uGDepth:{value:m?.groove_depth_mm??.3},uSeed:{value:seed},uWander:{value:.06}};
 }
-// The surface before (or without) the record's own: every moment 0, a perfectly centred spiral.
-const NO_WANDER=new THREE.DataTexture(new Uint16Array(4),1,1,THREE.RGBAFormat,THREE.HalfFloatType);NO_WANDER.needsUpdate=true;NO_WANDER.userData.shared=true;
-const VINYL_ENV=.32,VINYL_ENV_HELD=.6;
+const VINYL_ENV=.32;
 /* The anisotropy frame must be the record's own radial/tangential frame. Three
    builds it from the UVs (a fixed direction painted on the disc), which turns with
    the record and swings the highlight round; replace it in the expanded chunk. The
@@ -261,52 +250,26 @@ function vinylMaterial(m){
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 vDisc;varying vec3 vAxX,vAxY;')
    .replace('#include <begin_vertex>','#include <begin_vertex>\nvDisc=position.xy;vAxX=normalMatrix*vec3(1.,0.,0.);vAxY=normalMatrix*vec3(0.,1.,0.);');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
-varying vec2 vDisc;varying vec3 vAxX,vAxY;uniform float uRStart,uREnd,uPitch,uLabel,uGA,uGT,uGEnd,uGHw,uGDepth;uniform sampler2D uGroove;
-// moments of turn k's centre at turn fraction a, mip level L (level 0: rows 0..T-1; level L: rows
-// T.., from x = A(1-2^(1-L)), A/2^L wide); linear along the turn, never across turns or levels
-vec4 gLev(float k,float a,float L){float w=uGA*exp2(-L),x=clamp(a*w,.5,max(.5,w-.5)),off=L<.5?0.:uGA*(1.-exp2(1.-L));
- return textureLod(uGroove,vec2((off+x)/uGA,((L<.5?0.:uGT)+clamp(k,0.,uGT-1.)+.5)/(2.*uGT)),0.);}
-vec4 gMom(float k,float a,float lod){float L=floor(lod);return mix(gLev(k,a,L),gLev(k,a,min(L+1.,log2(uGA))),lod-L)*step(0.,k)*step(k,uGT-1.);}
-// the cut's profile, repeating every pitch: depth below the land (<=0) at d mm from a groove centre,
-// and the running length of wall up to d (for the wall share of a footprint)
-float gHt(float d){d-=uPitch*floor(d/uPitch+.5);return -uGDepth*max(0.,1.-abs(d)/uGHw);}
-float gWl(float d){float u=d+.5*uPitch,n=floor(u/uPitch);return n*2.*uGHw+clamp(u-n*uPitch-(.5*uPitch-uGHw),0.,2.*uGHw);}`)
+varying vec2 vDisc;varying vec3 vAxX,vAxY;uniform float uRStart,uREnd,uPitch,uLabel,uGHw,uGDepth,uSeed,uWander;`)
    .replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
     float gR=length(vDisc);
     float gMask=smoothstep(uREnd-.25,uREnd+.25,gR)*(1.-smoothstep(uRStart-.1,uRStart+.5,gR));
-    float gPh=(uRStart-gR)/uPitch,gFw=length(vec2(dFdx(gPh),dFdy(gPh)));
     float runout=smoothstep(uLabel+.8,uLabel+1.6,gR)*(1.-smoothstep(uREnd-.6,uREnd-.2,gR));
     float gLine=runout*(1.-smoothstep(0.,.18,abs(gR-(uLabel+(uREnd-uLabel)*.45))));
     roughnessFactor=mix(roughnessFactor,.55,gLine);float gLandRough=roughnessFactor;
-    // the groove under this pixel: turn k at turn fraction a (the spiral's own angle, as the cut and
-    // its PNG: a = -atan2(y,x)/2pi); the nearer of the two turns either side, by true distance
-    float gA=fract(-atan(vDisc.y,vDisc.x)*.15915494);vec2 gAd=vec2(dFdx(gA),dFdy(gA));gAd-=floor(gAd+.5);
-    float gLod=clamp(log2(max(1.,uGA*(abs(gAd.x)+abs(gAd.y)))),0.,log2(uGA));
-    float gK=floor(gPh-gA+.5),gK1=gK+(gPh-gA>gK?1.:-1.);
-    vec4 gM=gMom(gK,gA,gLod),gM1=gMom(gK1,gA,gLod);
-    float gD=uPitch*(gK+gA-gPh)-gM.x,gD1=uPitch*(gK1+gA-gPh)-gM1.x;
-    if(abs(gD1)<abs(gD)){gD=gD1;gM=gM1;gK=gK1;}
-    float gIn=gMask*step(0.,gK+gA)*step(gK+gA,uGEnd);
-    // box filter a pixel's footprint either side, widened by the centre's spread along the groove;
-    // as the pitch shrinks to 4..2 pixels the drawn grooves hand over to their exact average (the
-    // wall share 2hw/pitch, no mean tilt), so nothing finer than the pixels aliases into moire; the
-    // slope spread they hide stays, as roughness, at every distance
-    float gB=sqrt(pow2(uPitch*gFw)+3.*max(0.,gM.y-gM.x*gM.x))+1e-4,gS0=uGDepth/uGHw,gRes=1.-smoothstep(.25,.5,gFw);
-    float gFr=mix(min(1.,2.*uGHw/uPitch),clamp((gWl(gD+gB)-gWl(gD-gB))/(2.*gB),0.,1.),gRes),gWall=gFr*gIn;
-    float gMw=clamp(gRes*(gHt(gD+gB)-gHt(gD-gB))/(2.*gB)/max(gFr,1e-4),-gS0,gS0); // mean radial slope of the walls seen
-    // along the groove a wall leans by its slope times (spiral drift - c'): the wiggle tips the walls
-    float gSp=uPitch/(6.2831853*max(gR,1.)),gMs=gMw*(gSp-gM.z),gE2=max(0.,gSp*gSp-2.*gSp*gM.z+gM.w);
-    float gVarR=max(0.,gS0*gS0-gMw*gMw),gVarS=max(0.,gS0*gS0*gE2-gMs*gMs);
+    // the music's swing spreads the sheen (uWander, matched by eye to the old real-groove look);
+    // faint bands: louder passages look a touch rougher, quiet ones a touch brighter
+    float gBand=.5+.5*sin(gR*.21+uSeed)*sin(gR*.083+uSeed*1.7);
+    float gWall=gMask*min(1.,2.*uGHw/uPitch);
+    float gS0=uGDepth/uGHw,gSp=uPitch/(6.2831853*max(gR,1.));
+    float gVarR=gS0*gS0*gMask,gVarS=gS0*gS0*(gSp*gSp+uWander*(.4+.6*gBand))*gMask;
     roughnessFactor=pow(pow2(pow2(roughnessFactor))+2.*gVarS,.25);`)
    .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
     vec2 gDir=vDisc/max(gR,1e-3);vec3 gRadV=vAxX*gDir.x+vAxY*gDir.y;
-    vec3 gRad=normalize(gRadV-normal*dot(gRadV,normal));
-    vec3 gTanV=vAxX*gDir.y-vAxY*gDir.x;vec3 gTan=normalize(gTanV-normal*dot(gTanV,normal)-gRad*dot(gTanV,gRad));
-    // the walls' mean normal (the lands keep the flat one: the clearcoat lobe's own normal)
-    if(gWall>1e-4){normal=normalize(normal-gRad*gMw-gTan*gMs);gRad=normalize(gRadV-normal*dot(gRadV,normal));}`)
+    vec3 gRad=normalize(gRadV-normal*dot(gRadV,normal));`)
    .replace('#include <lights_physical_fragment>',grooveLightsChunk());
  };
- mat.customProgramCacheKey=()=>'vinyl-grooves-v7';
+ mat.customProgramCacheKey=()=>'vinyl-fake-grooves-v1';
  return mat;
 }
 function pvcMaterial(side=THREE.FrontSide){return new THREE.MeshPhysicalMaterial({color:0x0d0d0e,roughness:.28,metalness:0,ior:1.53,side});}
@@ -513,7 +476,7 @@ function buildShibaSpot(R,top,W,D){
 }
 // what the record is doing under the needle right now (band levels, bass pitch); null when the needle is up
 function shibaMusic(v,t){
- if(!shiba||toyChoice!=='shiba'||!v.down||v.state.grabbed)return null;const b=v.buffer||v.grooveBuffer;return b?shiba.features(b,t):null;
+ if(!shiba||toyChoice!=='shiba'||!v.down||v.state.grabbed)return null;const b=v.buffer;return b?shiba.features(b,t):null;
 }
 function updateShiba(music){
  if(!shiba||!shiba.loaded)return false;
@@ -1007,7 +970,7 @@ function placeTitle(force=false){
    click empty space or press Esc and they go back. Up to 9 show at once; the wheel turns
    through the rest. The cards sit on a plane nearer to you than any part of the machine or
    crate, and fly up out of the crate before coming forward, so they never pass through the
-   cabinet. The window grows while it is open, the same way as for Inspect. */
+   cabinet. The canvas grows round the pet while it is open (see the stage below). */
 const fan={on:false,closing:false,g:null,cards:[],list:[],scroll:0,hover:null,press:null,depth:0};
 const FAN_MAX=9,FAN_DUR=400,FAN_STAGGER=45;
 const fanEase=x=>1-Math.pow(1-x,3);
@@ -1130,7 +1093,6 @@ function updateFan(){
 }
 async function fanOpen(){
  if(fan.on||!PET)return false;
- if(inspect.active)return false;
  const list=window.vinyl?.allSleeves?.()||[];if(!list.length){window.petShell?.say?.('No other records yet. Drop a song on me.','hint');return false;}
  clearSleevePop();sleeveDrag=null;setHoverNow(null);
  fan.on=true;fan.closing=false;fan.list=list;fan.scroll=0;fan.hover=null;fan.depth=0;fan.top=null;
@@ -1194,60 +1156,18 @@ function contactDecal(w,d,opacity=.75){
  m.name='contact-shadow';m.renderOrder=-1;m.castShadow=m.receiveShadow=false;return m;
 }
 
-/* ---------- Pick up, turn in your hands, put back ---------- */
-function syncInspectUI(){if(!inspectButton)return;inspectButton.disabled=!window.vinyl.record;inspectButton.textContent=inspect.active?'Put record back':'Inspect record';inspectButton.setAttribute('aria-pressed',String(inspect.active));}
-const inspectButton=document.getElementById('inspectRecord');
-/* Held records: the groove surface is the record's own already (grooveSurface), at every distance,
-   so holding it only raises the room's reflection a little to show it off. Only a uniform changes. */
-function setDetail(on){
- const top=disc.getObjectByName('vinyl-grooves');if(!top)return;
- top.material.envMapIntensity=on?VINYL_ENV_HELD:VINYL_ENV;invalidate();
-}
-const INSPECT_IN=1.0,INSPECT_OUT=.95;
-function beginInspection(){
- const v=window.vinyl;if(!v.record||inspect.active||!disc.getObjectByName('vinyl-grooves'))return;
- v.setInspecting(true);drag=false;armHold=null;sleeveDrag=null;sleevePop=null;dropIn=null;disc.position.set(0,0,0);
- inspect.active=true;inspect.phase='out';inspect.elapsed=0;inspect.drag=null;
- inspect.saved={pos:camTween?camTween.p1.clone():camera.position.clone(),target:camTween?camTween.t1.clone():controls.target.clone()};
- inspect.from=disc.position.clone();inspect.qFrom=disc.quaternion.clone();
- inspect.held=new THREE.Vector3(-R*.35,-R*2.8,R*1.6);
- inspect.eye=inspect.held.clone().add(new THREE.Vector3(R*.15,-R*2.9,R*1.7));
- if(PET){ // the pet: the camera never moves (so the machine never shifts or grows); the record is brought to the eye,
-  // on the line of sight through the middle of the pet, near enough to fill about the pet's height
-  const eye=camera.position.clone(),dir=controls.target.clone().sub(eye).normalize(),d=R/(.95*Math.tan(camera.fov*Math.PI/360));
-  const heldW=eye.clone().addScaledVector(dir,d),par=disc.parent;par?.updateMatrixWorld(true);
-  inspect.heldWorld=heldW;inspect.held=par?par.worldToLocal(heldW.clone()):heldW.clone();inspect.eye=par?par.worldToLocal(eye.clone()):eye;} // the disc moves in its parent's space
- inspect.qHeld=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),inspect.eye.clone().sub(inspect.held).normalize());
- inspect.qHeld.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),.48));
- controls.enabled=false;
- if(PET){if(fan.on)fanClose(true);petRoom(true,'inspect');}
- else flyTo(inspect.eye,inspect.held,INSPECT_IN,()=>{if(inspect.active&&inspect.phase==='out'){inspect.phase='held';loosenInspectCamera();}});
- setDetail(true);syncInspectUI();invalidate();
-}
-function loosenInspectCamera(){
- if(PET)controls.target.copy(inspect.heldWorld||inspect.held); // on the line of sight already: the view does not change
- controls.minAzimuthAngle=-Infinity;controls.maxAzimuthAngle=Infinity;controls.minPolarAngle=.02;controls.maxPolarAngle=Math.PI-.02;
- controls.minDistance=R*.65;controls.maxDistance=PET?Math.max(R*5,camDist()*1.6):R*5;controls.enablePan=true;controls.zoomToCursor=true;controls.enabled=true;stopControlMomentum();controls.update();
- if(PET){ // the pet's inspect: the player never turns; drags turn the record in your hands, the wheel only brings it closer
-  controls.enableRotate=false;controls.enablePan=false;controls.zoomToCursor=false;controls.maxDistance=Math.max(controls.maxDistance,camDist()*1.6);
-  // the same pixel ratio and effects as the idle pet (no switch, so nothing on screen changes look);
-  // the canvas only covers the pet and a margin round it (see roomRect), so this stays cheap
-  clampInspectZoom(true);}
-}
-/* ---------- the pet's inspect room ----------
-   The pet's window is small, so a record brought close would run into its straight edges. While
-   inspecting, the window grows around the pet (inside its screen) and the camera keeps the same
-   picture in the old rectangle (a view offset), so nothing jumps; the zoom then stops where the
-   whole record still fits inside the grown window with a soft margin. */
+/* ---------- the pet's room (for the fan) ----------
+   While the fan is open the canvas grows round the pet (inside its screen) and the camera keeps the
+   same picture in the old rectangle (a view offset), so nothing jumps. */
 let petFrame=null; // {w0,h0,ox,oy,w,h}: the pet's frame inside a canvas that covers the whole window (room mode)
 /* The stage. The window covers the screen's work area, transparent (empty pixels click through),
    and the main process tells the page where the pet sits in it (a drag just moves the canvas). Normally the canvas covers just the
-   pet; the fan and Inspect switch it to cover the whole window ("room") and draw the pet at the
+   pet; the fan switches it to cover more of the window ("room") and draw the pet at the
    same screen pixels through a camera view offset. That switch is a page change (one task: restyle,
    resize the canvas, draw), so the OS window is never resized for it, never blanked, never moved.
    Scroll-to-size scales the canvas with a CSS transform while the wheel turns and settles once. */
 const stage={ox:0,oy:0,w:0,h:0,min:220,max:1100,aspect:1.12,ready:false};
-const roomUsers=new Set(); // 'inspect', 'fan': the canvas covers the window while either needs it
+const roomUsers=new Set(); // 'fan': the canvas covers the window while it needs it
 let roomOn=false;const stageLog=[];
 /* Moving to another screen (only one at a different display scaling): the main process asks the page
    to show nothing first; once a blank frame is on screen it moves the window, then sends the pet's
@@ -1277,16 +1197,16 @@ function applyStageInner(s){const sized=!stage.ready||s.w!==stage.w||s.h!==stage
  if(sized||roomOn)resize();else if(hov.id)showTitle();
 }
 let roomBox={x:0,y:0,w:0,h:0};
-function roomRect(){ // window coordinates of the canvas in room mode: the pet and what the fan or the held record needs round it
- const only=roomUsers.size===1&&roomUsers.has('inspect'),mx=Math.round(stage.w*(only?.3:1)),my=Math.round(stage.h*(only?.3:.9)),x=Math.max(0,stage.ox-mx),y=Math.max(0,stage.oy-my);
+function roomRect(){ // window coordinates of the canvas in room mode: the pet and what the fan needs round it
+ const mx=Math.round(stage.w),my=Math.round(stage.h*.9),x=Math.max(0,stage.ox-mx),y=Math.max(0,stage.oy-my);
  return {x,y,w:Math.min(innerWidth,stage.ox+stage.w+mx)-x,h:Math.min(innerHeight,stage.oy+stage.h+my)-y};
 }
-function petRoom(on,who='inspect'){
+function petRoom(on,who='fan'){
  if(on)roomUsers.add(who);else roomUsers.delete(who);
  const want=roomUsers.size>0,r=want?roomRect():null;
  if(want!==roomOn||(r&&(r.x!==roomBox.x||r.y!==roomBox.y||r.w!==roomBox.w||r.h!==roomBox.h))){
   if(zoomG.on)zoomSettle(true);
-  if(want!==roomOn)window.desk?.inspectRoom?.(want?'grow':'shrink'); // main only notes it (no window drags meanwhile)
+  if(want!==roomOn)window.desk?.room?.(want?'grow':'shrink'); // main only notes it (no window drags meanwhile)
   roomOn=want;
   if(r){roomBox=r;const st=document.documentElement.style;st.setProperty('--rx',r.x+'px');st.setProperty('--ry',r.y+'px');st.setProperty('--rw',r.w+'px');st.setProperty('--rh',r.h+'px');}
   document.documentElement.classList.toggle('room',want);
@@ -1330,45 +1250,12 @@ async function zoomSettle(now=false){
  if(r.w===zoomG.base.w){end(null);return;}
  try{const s=await window.desk.zoomTo(r);end(s);}catch(e){console.warn('zoom',e);end(null);}
 }
-// How close the camera may come: the record (a sphere of its radius) stays inside the drawable area.
-function inspectFitDistance(){
- const c=renderer.domElement,W=c.clientWidth||view.clientWidth,H=c.clientHeight||view.clientHeight;
- const f=petFrame&&!petFrame.closing&&Math.abs(W-petFrame.w)<3&&Math.abs(H-petFrame.h)<3?petFrame:null;
- const h0=f?f.h0:H,cx=f?f.ox+f.w0/2:W/2,cy=f?f.oy+f.h0/2:H/2;
- const margin=Math.max(8,Math.min(W,H)*.04),m=Math.max(20,Math.min(cx,W-cx,cy,H-cy)-margin);
- const focal=(h0/2)/Math.tan(camera.fov*Math.PI/360),alpha=Math.atan(m/focal);
- return R*1.02/Math.sin(alpha);
-}
-function clampInspectZoom(pushBack=false){
- if(!PET||!inspect.active||inspect.phase!=='held')return;
- const d=inspectFitDistance();controls.minDistance=d;controls.maxDistance=Math.max(d*2.4,R*5,PET?camDist()*1.6:0); // the pet holds it where the camera already is: never pulled in
- if(pushBack){const off=camera.position.clone().sub(controls.target);if(off.length()<d){camera.position.copy(controls.target).add(off.setLength(d));}controls.update();}
- invalidate();
-}
-function returnRecord(){
- if(!inspect.active||inspect.phase==='back')return;
- if(PET){controls.minDistance=R*.65;controls.maxDistance=R*8;}
- inspect.phase='back';inspect.elapsed=0;inspect.drag=null;inspect.from=disc.position.clone();inspect.qFrom=disc.quaternion.clone();controls.enabled=false;
- {const back=inspect.saved||defaultPose();
-  if(PET&&camera.position.distanceTo(back.pos)<.01){controls.target.copy(back.target);controls.update();} // it never moved: just aim the controls back
-  else flyTo(back.pos,back.target,INSPECT_OUT);}
- invalidate();
-}
-function finishInspection(replacing=false){
- if(!inspect.active)return;
- inspect.active=false;inspect.phase='idle';inspect.drag=null;disc.position.set(0,0,0);disc.rotation.set(0,0,window.vinyl.state.rotation);controls.enabled=true;
- if(!replacing)setDetail(false);
- machineClamps();
- if(replacing&&inspect.saved){const s=inspect.saved;if(PET&&camera.position.distanceTo(s.pos)<.01)controls.target.copy(s.target);else flyTo(s.pos,s.target,.7);} // new record mid-inspection: still go back to the viewer's seat
- if(PET)petRoom(false,'inspect');
- window.vinyl.setInspecting(false);syncInspectUI();invalidate();
-}
 const smooth=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
-// Path from the spindle to the hand: straight up off the spindle (clear of its cap
-// but under the raised needle), forward and low out from under the arm and horn,
-// then up. u in 0..1, continuous in position and nearly so in speed.
+// Path from the spindle to a point in front (records swapping in and out): straight up off the
+// spindle (clear of its cap but under the raised needle), forward and low out from under the arm
+// and horn, then on to the point. u in 0..1, continuous in position and nearly so in speed.
 const LIFT_U=.2;
-function inspectPath(u,out,held=inspect.held){
+function liftPath(u,out,held){
  const clearZ=14; // spindle cap tops out near 10.7 mm; the arm swings up to ~26 mm while a record is lifted
  if(u<=LIFT_U)return out.set(0,0,clearZ*smooth(0,1,u/LIFT_U));
  const w=(u-LIFT_U)/(1-LIFT_U),v=1-w;
@@ -1376,29 +1263,7 @@ function inspectPath(u,out,held=inspect.held){
  const p0=new THREE.Vector3(0,0,clearZ),p1=new THREE.Vector3(R*.45,-R*1.25,clearZ),p2=new THREE.Vector3(R*.2,-R*2.4,R*.5),p3=held;
  return out.set(0,0,0).addScaledVector(p0,v*v*v).addScaledVector(p1,3*v*v*w).addScaledVector(p2,3*v*w*w).addScaledVector(p3,w*w*w);
 }
-function updateInspection(dt){
- if(!inspect.active)return false;
- if(inspect.phase!=='held'){
-  inspect.elapsed+=dt;
-  const dur=inspect.phase==='out'?INSPECT_IN:INSPECT_OUT,t=reduce()?1:Math.min(1,inspect.elapsed/dur);
-  // The record leaves the way a hand would take it: slid forward off the spindle,
-  // flat and low under the raised arm and the horn bell, and only tilted up to the
-  // eye once it is clear of the machine. Putting it back retraces the same path.
-  const k=easeInOut(t),flat=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),window.vinyl.state.rotation);
-  if(inspect.phase==='out'){
-   inspectPath(k,disc.position);
-   disc.quaternion.slerpQuaternions(inspect.qFrom,inspect.qHeld,smooth(.38,1,k));
-   if(t>=1&&!camTween){inspect.phase='held';loosenInspectCamera();}
-  }else{
-   inspectPath(1-k,disc.position,inspect.from);
-   disc.quaternion.slerpQuaternions(inspect.qFrom,flat,smooth(0,.62,k));
-   if(t>=1){finishInspection();return true;}
-  }
- }
- return inspect.phase!=='held';
-}
-inspectButton?.addEventListener('click',()=>inspect.active?returnRecord():beginInspection());
-window.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(fan.on){e.preventDefault();fanClose();return;}if(inspect.active){e.preventDefault();returnRecord();return;}if(sleevePop||sleeveDrag){e.preventDefault();sleeveDrag=null;clearSleevePop();setCursor('');}});
+window.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(fan.on){e.preventDefault();fanClose();return;}if(sleevePop||sleeveDrag){e.preventDefault();sleeveDrag=null;clearSleevePop();setCursor('');}});
 
 /* ---------- The bench (one-room mode): lathe, blank stack, post tray ----------
    Sits to the right of the cabinet at platter height. The lathe's blank shows the
@@ -1556,7 +1421,6 @@ function rescaleCamera(oldR,newR){
 }
 function mountRecord(record){
  version++;const v=version;
- const wasInspecting=inspect.active;finishInspection(true);
  const hadRecord=!!disc.getObjectByName('vinyl-grooves');
  if(hadRecord&&!reduce()){ // the outgoing disc lifts and glides off to the sleeve rack
   const g=new THREE.Group();g.position.copy(disc.position);g.quaternion.copy(disc.quaternion);while(disc.children.length)g.add(disc.children[0]);
@@ -1565,8 +1429,8 @@ function mountRecord(record){
   g.userData.anim={e:0,dur:1.15,q0:g.quaternion.clone(),route,q1};outgoing.add(g);
  }else clearDisc();
  const oldR=R;R=record.metadata.disc_radius_mm;buildPhonograph(R);if(oldR!==R)buildSleeves();
- if(oldR!==R&&!wasInspecting)rescaleCamera(oldR,R);else if(!inspect.active&&!camTween)machineClamps();
- tonearm.visible=true;armHold=null;buildRecord(record.metadata,record.label,record.cover||null);syncInspectUI();
+ if(oldR!==R)rescaleCamera(oldR,R);else if(!camTween)machineClamps();
+ tonearm.visible=true;armHold=null;buildRecord(record.metadata,record.label,record.cover||null);
  // the incoming disc arrives from its sleeve (or from above) and settles on the spindle
  // (it waits in front of the machine, never above it: the horn bell hangs over the platter)
  const extract=pendingExtract;pendingExtract=null;
@@ -1581,14 +1445,14 @@ function mountRecord(record){
   dropIn={e:0,dur,delay:hadRecord?.35:(lathe?.35:0),from,tilt,lathe,extract,extractDur,flightDur};
   if(lathe){disc.position.copy(from);disc.rotation.x=0;}
   else if(extract){disc.position.copy(extract.inside);disc.quaternion.copy(extract.q);}
-  else{inspectPath(1,disc.position,from);disc.rotation.x=tilt;}
+  else{liftPath(1,disc.position,from);disc.rotation.x=tilt;}
  }else{dropIn=null;disc.position.set(0,0,0);disc.rotation.set(0,0,0);}
  invalidate(4);
 }
 /* Records only ever travel in front of the machine. Outgoing: lift off the spindle,
-   slide out low under the arm and horn (the inspection route) to a point in front,
+   slide out low under the arm and horn (liftPath) to a point in front,
    then sweep left along the front into its sleeve. Incoming: the reverse of the
-   inspection route from wherever it waits in front. */
+   same route from wherever it waits in front. */
 const cubic=(out,a,b,c,d,w)=>{const v=1-w;return out.set(0,0,0).addScaledVector(a,v*v*v).addScaledVector(b,3*v*v*w).addScaledVector(c,3*v*w*w).addScaledVector(d,w*w*w);};
 const FRONT=()=>new THREE.Vector3(-R*.1,-R*2.55,R*.75);
 // From the point in front of the machine to a sleeve anywhere in the room: round the
@@ -1599,16 +1463,16 @@ function routeTo(dest){
  pts.push(new THREE.Vector3(dest.x,dest.y,Math.max(dest.z+R*1.15,tableZ+R*.9)),dest);
  return new THREE.CatmullRomCurve3(pts,false,'centripetal');
 }
-/* Clear → around the cabinet (reverse of routeTo) → under the horn (inspectPath) → spindle. */
+/* Clear → around the cabinet (reverse of routeTo) → under the horn (liftPath) → spindle. */
 function buildIncomingFlight(clear){
  const toFront=routeTo(clear).getPoints(14).reverse(); // clear … FRONT
  const pts=toFront.map(p=>p.clone());
  const front=FRONT(),tmp=new THREE.Vector3();
- for(let i=9;i>=0;i--){inspectPath(i/10,tmp,front);pts.push(tmp.clone());}
+ for(let i=9;i>=0;i--){liftPath(i/10,tmp,front);pts.push(tmp.clone());}
  return new THREE.CatmullRomCurve3(pts,false,'centripetal');
 }
 function outgoingPath(u,out,route){
- if(u<=.5)return inspectPath(u/.5,out,FRONT());
+ if(u<=.5)return liftPath(u/.5,out,FRONT());
  return out.copy(route.getPointAt((u-.5)/.5));
 }
 function updateSwap(dt){
@@ -1617,24 +1481,24 @@ function updateSwap(dt){
   if(a.direct)g.position.copy(a.route.getPointAt(k));else outgoingPath(k,g.position,a.route);g.quaternion.slerpQuaternions(a.q0,a.q1,smooth(.5,.9,k));
   g.scale.setScalar(1-.04*smooth(.85,1,k));g.visible=k<.995; // slips into the sleeve
   if(t>=1){outgoing.remove(g);disposeTree(g);if(a.direct&&bench.blank)bench.blank.visible=true;}busy=true;}
- if(dropIn&&!inspect.active){const d=dropIn;
+ if(dropIn){const d=dropIn;
   // Sub-step so a slow frame cannot skip across the extract→flight join and teleport.
   let left=dt;while(left>0){const step=Math.min(left,1/30);left-=step;d.e+=step;
    if(d.e<=d.delay){if(d.extract){disc.position.copy(d.extract.inside);disc.quaternion.copy(d.extract.q);}continue;}
    const te=d.e-d.delay;
    if(d.lathe){const t=Math.max(0,Math.min(1,te/d.dur)),k=easeInOut(t);const up=d.from.clone();up.z+=R*.55;
-    if(k<.22)disc.position.copy(d.from).setZ(d.from.z+R*.55*smooth(0,1,k/.22));else inspectPath(1-(k-.22)/.78,disc.position,up);
+    if(k<.22)disc.position.copy(d.from).setZ(d.from.z+R*.55*smooth(0,1,k/.22));else liftPath(1-(k-.22)/.78,disc.position,up);
     if(t>=1){disc.position.set(0,0,0);disc.rotation.set(0,0,0);disc.quaternion.identity();dropIn=null;if(bench.blank)bench.blank.visible=true;break;}
    }else if(d.extract){ // slide out of the sleeve (~1.25 s), then a gentle arc onto the platter (~1.55 s)
     const ed=d.extractDur||1.25,fd=d.flightDur||1.55,flat=new THREE.Quaternion();
     if(te<ed){const u=easeInOut(te/ed);disc.position.lerpVectors(d.extract.inside,d.extract.clear,u);disc.quaternion.copy(d.extract.q);}
     else{const u=easeInOut(Math.min(1,(te-ed)/fd));
-     if(d.extract.flight)d.extract.flight.getPoint(u,disc.position);else inspectPath(1-u,disc.position,d.extract.clear);
+     if(d.extract.flight)d.extract.flight.getPoint(u,disc.position);else liftPath(1-u,disc.position,d.extract.clear);
      keepDiscAwayFromCamera(disc.position);
      disc.quaternion.slerpQuaternions(d.extract.q,flat,smooth(0,.5,u));}
     if(te>=ed+fd){disc.position.set(0,0,0);disc.rotation.set(0,0,0);disc.quaternion.identity();dropIn=null;break;}
    }else{const t=Math.max(0,Math.min(1,te/d.dur)),k=easeInOut(t);
-    inspectPath(1-k,disc.position,d.from);disc.rotation.x=d.tilt*(1-smooth(0,.45,k));
+    liftPath(1-k,disc.position,d.from);disc.rotation.x=d.tilt*(1-smooth(0,.45,k));
     if(t>=1){disc.position.set(0,0,0);disc.rotation.set(0,0,0);disc.quaternion.identity();dropIn=null;break;}
    }
   }busy=true;}
@@ -1708,14 +1572,7 @@ function pickAt(e){
 }
 renderer.domElement.addEventListener('pointerdown',e=>{
  invalidate();
- if(PET&&inspect.active&&e.button!==0){if(inspect.phase==='held'&&e.button===2){inspect.drag={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}return;} // the pet's inspect: a right-drag turns the record too, never the player
  if(e.button!==0)return;const v=window.vinyl;
- if(inspect.active){
-  if(inspect.phase!=='held')return;setRay(e);
-  if(ray.intersectObject(disc,true).length){inspect.drag={x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}
-  else{const p=hitPlane(e,0);if(PET||(p&&Math.hypot(p.x,p.y)<R*1.05))returnRecord();}
-  return;
- }
  if(fan.on){ // the fan is up: a card plays on click; anywhere else puts them back
   const f=fanPick(e);if(f){fan.press={id:f.id,x:e.clientX,y:e.clientY};renderer.domElement.setPointerCapture?.(e.pointerId);}
   else if(!fan.closing)fanClose();
@@ -1740,7 +1597,7 @@ renderer.domElement.addEventListener('pointerdown',e=>{
   if(!onDisc){window.petShell?.beginMove(e);return;}
   if(!v.down){window.petShell?.beginMove(e,{soft:true});return;}
   drag=true;renderer.domElement.setPointerCapture?.(e.pointerId);v.grabStart(p.x,p.y);return;}
- if(!v.record||dropIn)return;const p=hit(e);if(!p||Math.hypot(p.x,p.y)>R+1)return;if(!v.down){beginInspection();return;}drag=true;renderer.domElement.setPointerCapture?.(e.pointerId);v.grabStart(p.x,p.y);
+ if(!v.record||dropIn)return;const p=hit(e);if(!p||Math.hypot(p.x,p.y)>R+1)return;if(!v.down)return;drag=true;renderer.domElement.setPointerCapture?.(e.pointerId);v.grabStart(p.x,p.y);
 });
 /* Click-to-pop sleeves: jackets stay in the crate. Hover raises a sleeve; a click slides
    its record half out and holds it; a second click on it sends it to the platter (a drag
@@ -1762,14 +1619,9 @@ function moveSleeve(e){
 renderer.domElement.addEventListener('pointermove',e=>{
  const v=window.vinyl;
  if(knobFx.drag){setKnobVolume(knobFx.drag.v0+(knobFx.drag.y-e.clientY)/140);return;}
- if(!sleeveDrag&&!armHold&&!drag&&!inspect.active&&e.buttons===0){const p=pickAt(e);setCursor(p?(p.kind==='transport'||p.kind==='fan'?'pointer':p.kind==='knob'?'ns-resize':'grab'):'');
+ if(!sleeveDrag&&!armHold&&!drag&&e.buttons===0){const p=pickAt(e);setCursor(p?(p.kind==='transport'||p.kind==='fan'?'pointer':p.kind==='knob'?'ns-resize':'grab'):'');
   const id=p?.kind==='sleeve'&&p.obj.userData.racked?'s:'+p.obj.userData.sleeveId:p?.kind==='transport'?'k:'+p.key:p?.kind==='knob'?'k:volume':p?.kind==='fan'?'f:'+p.id:null;
   wantHover(id);}
- if(inspect.active){if(inspect.drag&&inspect.phase==='held'){
-  const dx=e.clientX-inspect.drag.x,dy=e.clientY-inspect.drag.y;inspect.drag={x:e.clientX,y:e.clientY};
-  const right=new THREE.Vector3(1,0,0).transformDirection(camera.matrixWorld),up=new THREE.Vector3(0,1,0).transformDirection(camera.matrixWorld);
-  disc.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(up,dx*.008)).premultiply(new THREE.Quaternion().setFromAxisAngle(right,dy*.008));invalidate();
- }return;}
  if(armHold){const dy=e.clientY-armHold.y;if(Math.abs(dy)>4||Math.abs(e.clientX-armHold.x)>4)armHold.moved=true;armHold.value=Math.max(0,Math.min(1,armHold.start-dy/90));
   if(armHold.moved){if(armHold.value>.6&&v.down&&!v.state.grabbed)v.lift();else if(armHold.value<.15&&!v.down)v.drop()?.catch?.(()=>{});}
   invalidate();return;}
@@ -1789,7 +1641,6 @@ function sendSleeve(j,id){
  return true;
 }
 function endPointer(e,cancel=false){
- if(inspect.active){inspect.drag=null;return true;}
  const v=window.vinyl;
  if(armHold){const h=armHold;armHold=null;
   if(!cancel){if(!h.moved){if(v.down&&!v.state.grabbed)v.lift();else v.drop()?.catch?.(()=>{});}
@@ -1819,12 +1670,10 @@ function endPointer(e,cancel=false){
   invalidate();return true;}
  return false;
 }
-renderer.domElement.addEventListener('pointerup',e=>{if(knobFx.drag&&e.button===0){knobFx.drag=null;invalidate(2);return;}if(inspect.active&&e.button!==0){inspect.drag=null;return;}if(e.button!==0)return;
+renderer.domElement.addEventListener('pointerup',e=>{if(knobFx.drag&&e.button===0){knobFx.drag=null;invalidate(2);return;}if(e.button!==0)return;
  if(fan.press){const f=fan.press;fan.press=null;if(Math.hypot(e.clientX-f.x,e.clientY-f.y)<6&&fan.on&&!fan.closing){fanClose();window.vinyl?.goTo?.(f.id);}return;}if(endPointer(e))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 renderer.domElement.addEventListener('dblclick',e=>{if(e.button!==0)return;
- if(PET&&!inspect.active&&onCrate(e)&&!fanPick(e)){if(fan.on)fanClose();else fanOpen();return;}
- if(fan.on)return;setRay(e);const onDisc=!!window.vinyl.record&&ray.intersectObject(disc,true).length>0;
- if(onDisc){if(inspect.active){if(inspect.phase==='held')returnRecord();}else beginInspection();return;}
+ if(PET&&onCrate(e)&&!fanPick(e)){if(fan.on)fanClose();else fanOpen();return;}
  });
 renderer.domElement.addEventListener('pointercancel',e=>{if(endPointer(e,true))return;if(drag){drag=false;window.vinyl.grabEnd();}});
 // Narrow (portrait) views widen the lens instead of moving the viewer, so the whole machine stays in frame.
@@ -1835,7 +1684,7 @@ function resize(){const w=view.clientWidth,h=view.clientHeight;if(!w||!h)return;
  camera.fov=camera.aspect>=BASE_ASPECT?BASE_FOV:Math.min(62,2*Math.atan(Math.tan(BASE_FOV*Math.PI/360)*BASE_ASPECT/camera.aspect)*180/Math.PI);
  if(f)camera.setViewOffset(f.w0,f.h0,-f.ox,-f.oy,w,h);else camera.clearViewOffset();
  const c=renderer.domElement,before=c.width+'x'+c.height;
- camera.updateProjectionMatrix();clampInspectZoom(true);if(w!==lastPostW||h!==lastPostH){lastPostW=w;lastPostH=h;post.resize(w,h);}if(fan.on&&!fan.closing){fan.depth=0;layoutFan();}if(hov.id)showTitle();invalidate();
+ camera.updateProjectionMatrix();if(w!==lastPostW||h!==lastPostH){lastPostW=w;lastPostH=h;post.resize(w,h);}if(fan.on&&!fan.closing){fan.depth=0;layoutFan();}if(hov.id)showTitle();invalidate();
  // a resized canvas is empty: draw it now, in this task, so the screen never gets the empty one
  if(resizeReady&&firstDrawn&&c.width+'x'+c.height!==before){scene.updateMatrixWorld();drawFrame(performance.now());lastDrawAt=performance.now();resizeDraws++;}
 } // passes read the updated projection
@@ -1844,7 +1693,7 @@ new ResizeObserver(resize).observe(view);resize();
 if(PET&&window.desk?.initialStage)applyStage(window.desk.initialStage);
 if(PET&&window.desk?.onStage){window.desk.onStage(applyStage);window.desk.onStageHold?.(stageHold);window.desk.stageGet?.().then(applyStage);}
 function loudness(v,t){
- if(!v.down||v.state.grabbed)return 0;const b=v.buffer||v.grooveBuffer;if(!b)return 0;
+ if(!v.down||v.state.grabbed)return 0;const b=v.buffer;if(!b)return 0;
  const ch=b.getChannelData(0),sr=b.sampleRate,c=Math.floor(t*sr),n=Math.floor(sr*.035);let s=0,k=0;
  for(let i=Math.max(0,c-n),e=Math.min(ch.length,c+n);i<e;i+=4){s+=ch[i]*ch[i];k++;}
  return k?Math.sqrt(s/k):0;
@@ -1864,12 +1713,12 @@ function syncQualityUI(s=post.state()){if(!qualitySelect)return;qualitySelect.va
 qualitySelect?.addEventListener('change',()=>post.setMode(qualitySelect.value));syncQualityUI();
 // Screen positions of things, for automated checks (and handy in the console).
 function toClient(v){const b=renderer.domElement.getBoundingClientRect(),n=v.clone().project(camera);return {x:b.left+(n.x+1)/2*b.width,y:b.top+(1-n.y)/2*b.height};}
-window.vinylView={get toy(){return toyChoice;},get grooveSurface(){return gsurf?{state:gsurf.state,source:gsurf.source||null,tried:gsurf.tried.slice(),A:gsurf.A,T:gsurf.T,bytes:gsurf.bytes,buildMs:gsurf.buildMs}:null;},toClient:(x,y,z)=>toClient(new THREE.Vector3(x,y,z)),sleevePoints:()=>sleeves.children.filter(j=>j.userData.sleeveId!=null).map(j=>({id:j.userData.sleeveId,empty:!!j.userData.empty,...toClient(jacketCenter({p:j.position,q:j.quaternion}))})),get R(){return R;},get tableZ(){return tableZ;},invalidate,setQuality:m=>post.setMode(m),get quality(){return post.state();},get hoverId(){return hoverId;},get sleevePop(){return sleevePop?{id:sleevePop.id}:null;},get lathe(){return bench?{state:bench.state,shown:bench.shown,target:bench.target}:null;},get info(){const i=renderer.info;return {calls:i.render.calls,triangles:i.render.triangles,geometries:i.memory.geometries,textures:i.memory.textures,programs:i.programs?.length};},keepInRoom,keepBelowCeiling,armSwapFromSleeve,captureExtract,keepDiscAwayFromCamera,roomBounds,presentPose,clearSleevePop};
+window.vinylView={get toy(){return toyChoice;},toClient:(x,y,z)=>toClient(new THREE.Vector3(x,y,z)),sleevePoints:()=>sleeves.children.filter(j=>j.userData.sleeveId!=null).map(j=>({id:j.userData.sleeveId,empty:!!j.userData.empty,...toClient(jacketCenter({p:j.position,q:j.quaternion}))})),get R(){return R;},get tableZ(){return tableZ;},invalidate,setQuality:m=>post.setMode(m),get quality(){return post.state();},get hoverId(){return hoverId;},get sleevePop(){return sleevePop?{id:sleevePop.id}:null;},get lathe(){return bench?{state:bench.state,shown:bench.shown,target:bench.target}:null;},get info(){const i=renderer.info;return {calls:i.render.calls,triangles:i.render.triangles,geometries:i.memory.geometries,textures:i.memory.textures,programs:i.programs?.length};},keepInRoom,keepBelowCeiling,armSwapFromSleeve,captureExtract,keepDiscAwayFromCamera,roomBounds,presentPose,clearSleevePop};
 document.addEventListener?.('visibilitychange',()=>invalidate(2));
 
 // The demo may finish loading while Three.js/room modules are still downloading.
 if(window.vinyl.record)mountRecord(window.vinyl.record);
-sleeveData=window.vinyl.sleeves?.()||sleeveData;currentSleeve=window.vinyl.currentSleeve?.()||null;buildSleeves();syncInspectUI();
+sleeveData=window.vinyl.sleeves?.()||sleeveData;currentSleeve=window.vinyl.currentSleeve?.()||null;buildSleeves();
 let lastFrame=performance.now(),lastSig=NaN,firstDrawn=false,shadowSig=NaN,shadowAt=-1e9,shadowPending=false;resizeReady=true;
 /* Only shadow casters that move count; the disc's spin does not (its shadow is a
    circle). The arm's audio wobble is quantised away; updates are capped at 30 Hz. */
@@ -1894,50 +1743,13 @@ function signature(){
  return c.x*1.31+c.y*1.73+c.z*2.11+t.x*.37+t.y*.53+t.z*.71+disc.rotation.z*997+p.x*3.1+p.y*3.7+p.z*4.3+q.x*41+q.y*43+
   armRig.rotation.z*503+armTilt.rotation.y*709+hula.ax*301+hula.ay*307+hula.bz*311+(shiba?shiba.wob.x*313+shiba.wob.y*317+shiba.wob.z*331+(shiba.ripple||0)*337+(shiba.loaded?17:0):0)+toyAnim.t*337+toyAnim.press*347+(toyChoice==='hula'?19:0)+(tonearm.visible?1:0)+outgoing.children.length*13;
 }
-/* The record's own groove surface for the vinyl shader (groove-surface-worker.js has the whole story):
-   built once per record off the UI thread from, best first, the 16-bit PNG's pixels, the vector
-   master, or (neither carried, as the bundled demo) the playback audio taken back to displacement.
-   Until it lands, and for any record that cannot be read, the disc shows the same V groove with its
-   centre on the nominal spiral. One RGBA16F texture, no GPU mips (the chain is packed in it). */
-let gsurf=null;
-async function recordBytes(rec,file,name){
- if(rec[file]?.arrayBuffer)return await rec[file].arrayBuffer();
- if(!rec.base||rec.base==='demo/')return null; // imported without it, or the bundled demo (audio and preview only)
- try{const r=await fetch(rec.base+name);return r.ok?await r.arrayBuffer():null;}catch{return null;}
-}
-function grooveSurface(){
- const v=window.vinyl,rec=v?.record,u=disc.getObjectByName('vinyl-grooves')?.material?.userData?.groove;
- if(gsurf&&gsurf.rec!==rec){gsurf.worker?.terminate();gsurf.tex?.dispose();gsurf=null;}
- if(!rec||!u||gsurf?.busy||gsurf?.state==='ok'||gsurf?.state==='none'||typeof Worker==='undefined')return;
- const m=rec.metadata;if(!gsurf)gsurf={rec,state:'loading',next:0,busy:false,tried:[]};
- const job=gsurf,kinds=['png','vector','playback'];
- if(!m||!Number.isFinite(m.lead_in_turns+m.duration_sec*m.rpm_cut/60)){job.state='none';return;}
- if(job.next>=kinds.length){job.state='none';return;}
- const kind=kinds[job.next];if(kind==='playback'&&!v.buffer)return; // its audio is not decoded yet: next frame
- job.busy=true;
- (async()=>{
-  let msg={metadata:m,kind,maxTex:renderer.capabilities?.maxTextureSize||8192},transfer=[];
-  if(kind==='playback'){const ch=Float32Array.from(v.buffer.getChannelData(0));msg.samples=ch;msg.sampleRate=v.buffer.sampleRate;transfer=[ch.buffer];}
-  else{const bytes=await recordBytes(rec,kind==='png'?'heightmapFile':'grooveFile',kind==='png'?'heightmap.png':'heightmap.groove.wav');if(!bytes)return null;msg.bytes=bytes;transfer=[bytes];}
-  if(gsurf!==job)return null;
-  const w=job.worker=new Worker(new URL('./groove-surface-worker.js',import.meta.url));
-  return await new Promise(res=>{w.onmessage=e=>{w.terminate();res(e.data);};w.onerror=()=>{w.terminate();res(null);};w.postMessage(msg,transfer);});
- })().then(d=>{
-  if(gsurf!==job)return;job.busy=false;job.worker=null;job.tried.push(kind);
-  if(!d?.ok){job.next++;return;}
-  const t=new THREE.DataTexture(d.data,d.width,d.height,THREE.RGBAFormat,THREE.HalfFloatType);t.colorSpace=THREE.NoColorSpace;
-  t.magFilter=t.minFilter=THREE.LinearFilter;t.generateMipmaps=false;t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping;t.needsUpdate=true;
-  Object.assign(job,{state:'ok',source:kind,tex:t,A:d.A,T:d.T,bytes:d.bytes,buildMs:d.totalMs});
-  u.uGroove.value=t;u.uGA.value=d.A;u.uGT.value=d.T;invalidate(2);
- },()=>{if(gsurf===job){job.busy=false;job.worker=null;job.next++;}});
-}
 function tickScene(dt, nowMs){
  const v=window.vinyl,r=v&&v.record;let energy=0,music=null;
  frameDt=dt;
- if(r){const m=r.metadata,t=v.time(),th=2*Math.PI*(m.lead_in_turns+t*m.rpm_cut/60);if(!v.state.grabbed)v.state.rotation=v.state.angle+th;if(v.state.grabbed)v.grabTick();if(!inspect.active&&!dropIn)disc.rotation.z=v.state.rotation;
-  let d=0;const displacement=v.grooveBuffer||v.buffer;if(displacement){const samples=displacement.getChannelData(0);d=samples[Math.min(samples.length-1,Math.floor(t*displacement.sampleRate))]||0;}
+ if(r){const m=r.metadata,t=v.time(),th=2*Math.PI*(m.lead_in_turns+t*m.rpm_cut/60);if(!v.state.grabbed)v.state.rotation=v.state.angle+th;if(v.state.grabbed)v.grabTick();if(!dropIn)disc.rotation.z=v.state.rotation;
+  let d=0;const displacement=v.buffer;if(displacement){const samples=displacement.getChannelData(0);d=samples[Math.min(samples.length-1,Math.floor(t*displacement.sampleRate))]||0;}
   const rad=m.r_start_mm-m.pitch_mm*th/(2*Math.PI)+m.amp_mm*d;
-  const moving=inspect.active||dropIn||outgoing.children.length;
+  const moving=dropIn||outgoing.children.length;
   const tipZ=armHold?m.thickness_mm-.25+armHold.value*13.25:m.thickness_mm+(moving?24:v.down?-.25:13);
   placeTonearm(rad*Math.cos(v.state.angle),rad*Math.sin(v.state.angle),tipZ,v.down);
   energy=loudness(v,t);music=shibaMusic(v,t);
@@ -1948,8 +1760,7 @@ function tickScene(dt, nowMs){
  if(shibaMoving)why.push('shiba');
  if(updateToys(dt))why.push('toy');
  if(updateKeys(dt))why.push('keys');if(updateKnob(dt))why.push('knob');if(updateFan())why.push('fan');
- grooveSurface();
- if(updateSleeves(dt))why.push('sleeves');if(updateLathe(dt))why.push('lathe');if(updateInspection(dt))why.push('inspect');if(updateSwap(dt))why.push('swap');
+ if(updateSleeves(dt))why.push('sleeves');if(updateLathe(dt))why.push('lathe');if(updateSwap(dt))why.push('swap');
  if(updateCamTween(dt)){zoom.goal=null;zoom.vel=0;why.push('flight');}else{const z=applyZoom(dt);if(controls.update()||z)why.push('controls');}
  if(keepInRoom())why.push('room');
  if(shiba?.detail(camera,renderer.domElement.clientHeight||view.clientHeight))why.push('shiba-detail');
@@ -1964,7 +1775,7 @@ function drawFrame(nowMs){
 }
 function drawFrameInner(nowMs){
  updateShadows(nowMs);
- post.focus?.(inspect.active?camera.position.distanceTo(disc.position):camera.position.distanceTo(focusPoint.set(R*.15,0,4)));
+ post.focus?.(camera.position.distanceTo(focusPoint.set(R*.15,0,4)));
  post.render(nowMs);if(dirty>0)dirty--;placeTitle();
  // the first frame with the pet at its place: once it is on screen, the window may be shown
  if(PET&&!placedSaid&&stage.ready&&!document.documentElement.classList.contains('handoff')){placedSaid=true;requestAnimationFrame(()=>requestAnimationFrame(()=>window.desk?.placed?.()));}
@@ -1978,18 +1789,15 @@ function frame(){
  rafOn=false;
  if(!PET)requestAnimationFrame(frame);
  const now=performance.now();
- const hands=drag||armHold||sleeveDrag||inspect.active||camTween||dropIn||window.petShell?.busy||(fan.g&&fan.cards.some(c=>c.userData.anim));
+ const hands=drag||armHold||sleeveDrag||camTween||dropIn||window.petShell?.busy||(fan.g&&fan.cards.some(c=>c.userData.anim));
  // a hand on the record (scratching), the arm, a sleeve, the knob or the pet itself
- const held=PET&&!inspect.active&&!!(drag||armHold||sleeveDrag||knobFx.drag||window.petShell?.busy);
+ const held=PET&&!!(drag||armHold||sleeveDrag||knobFx.drag||window.petShell?.busy);
  if(PET)post.hold?.(held); // no resolution/tier switch (a canvas reallocation) in the middle of a gesture
  if(PET&&!hands&&dirty<=0&&now-lastDrawAt<31){rafOn=true;requestAnimationFrame(frame);return;} // at most ~30 fps while it only spins (rAF-quantised)
  // Under a hand: at most ~40 fps. The window covers the screen, so every frame is a whole-screen
  // transparent window for the OS to compose; drawn at a 144 Hz monitor's full rate while scratching
  // it stalled the whole PC. The sound follows the pointer events themselves, not the frames.
  if(held&&now-lastDrawAt<HELD_GAP){rafOn=true;requestAnimationFrame(frame);return;}
- // inspect: up to 60 fps while you turn or zoom it (or it flies), ~30 while it is only held; never the
- // monitor's full rate (a 144 Hz screen drew every frame of a big window)
- if(PET&&inspect.active&&now-lastDrawAt<((now-lastInputAt<300||camTween)?15:31)){rafOn=true;requestAnimationFrame(frame);return;}
  const raw=Math.max(.001,(now-lastFrame)/1000),dt=Math.min(.25,raw);lastFrame=now;
  const {busy}=tickScene(dt, now);
  const draw=busy||dirty>0||drag||armHold||sleeveDrag;
@@ -2002,13 +1810,13 @@ function frame(){
 wakeLoop=()=>{if(sleepT){clearTimeout(sleepT);sleepT=null;}if(!rafOn){rafOn=true;requestAnimationFrame(frame);}};
 Object.assign(window.vinylView,{
  get camera(){return camera}, get controls(){return controls}, get disc(){return disc},
- get inspect(){return inspect}, get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
+ get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
  swapToy, get phonograph(){return phonograph},
  fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, applyStage, handoffs, zoomWheel, setQuality:m=>post.setMode(m),
  fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, knobPoint(){const k=phonograph.getObjectByName('volume-knob');if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},
- beginInspection, returnRecord, finishInspection, flyTo, snapToDefault, defaultPose, presentPose,
+ flyTo, snapToDefault, defaultPose, presentPose,
  keepBelowCeiling, keepInRoom, armSwapFromSleeve, captureExtract, keepDiscAwayFromCamera, roomBounds,
  jacketWorld(id){const j=sleeves.children.find(o=>o.userData.sleeveId===id);if(!j)return null;scene.updateMatrixWorld(true);const peek=j.userData.peekObj;return peek?peek.getWorldPosition(new THREE.Vector3()):jacketCenter(j.userData.home||sleeveHome(0,1));},
  presentFrom(){const p=presentPose();return jacketCenter(p);},

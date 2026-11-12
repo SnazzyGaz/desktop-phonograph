@@ -35,7 +35,7 @@ const ClampShader={
 export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onChange}={}){
  const gl=renderer.getContext?.();
  const canFloat=!!(renderer.capabilities?.isWebGL2);
- let userCap=Infinity,budget=Infinity,lite=false;
+ let userCap=Infinity,budget=Infinity;
  // a caller's ceiling replaces the tier's own; a pixel budget lowers it further on big windows (never below 1)
  const cap=()=>Math.min(userCap<Infinity?userCap:dprCap,budget<Infinity?Math.max(1,Math.sqrt(budget/Math.max(1,w*h))):Infinity);
  let pendingDpr=null,pendingBuild=false; // applied at the start of the next render, never between a draw and its paint
@@ -49,7 +49,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
   composer?.dispose?.();gtao?.dispose?.();bloom?.dispose?.();dof?.dispose?.();composer=gtao=bloom=lens=dof=null;
   // Start at <=1.5x (MSAA hides the difference); 'auto' climbs to the cap only if frames are quick.
   dprCap=tier==='high'?2:tier==='balanced'?1.5:1.25;
-  dpr=Math.min(devicePixelRatio||1,cap(),mode==='auto'?1.5:cap());renderer.setPixelRatio(dpr);applyLite();
+  dpr=Math.min(devicePixelRatio||1,cap(),mode==='auto'?1.5:cap());renderer.setPixelRatio(dpr);
   renderer.shadowMap.enabled=true;
   if(tier==='low'||!canFloat){resize(w,h);return;}
   const target=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples:4});
@@ -83,7 +83,7 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   lens=new ShaderPass(LensShader);composer.addPass(lens);
-  applyLite();resize(w,h);
+  resize(w,h);
  }
  function resize(width,height){
   w=Math.max(1,width|0);h=Math.max(1,height|0);
@@ -127,15 +127,12 @@ export function createPost(renderer,scene,camera,{storageKey='vinyl-quality',onC
   if(!['auto',...TIERS].includes(m))return;mode=m;try{localStorage.setItem(storageKey,m);}catch{}
   tier=m==='auto'?(weak?'balanced':'high'):m;samples=[];pendingBuild=true;onChange?.(state());
  }
- // A caller's ceiling on the pixel ratio (the desk pet: 1.25 normally, full in inspect).
+ // A caller's ceiling on the pixel ratio (the desk pet: 1.25).
  function setDprCap(c,pixels=Infinity){userCap=c>0?c:Infinity;budget=pixels>0?pixels:Infinity;const next=Math.min(devicePixelRatio||1,cap());if(Math.abs(next-dpr)>.01)later(next);}
- // Lite: skip ambient occlusion, depth of field and bloom (the pet's inspect: a record held up against nothing)
- function applyLite(){if(gtao)gtao.enabled=!lite;if(dof)dof.enabled=!lite;if(bloom)bloom.enabled=!lite;}
- function setLite(on){lite=!!on;applyLite();}
- function state(){return {mode,tier,dpr:pendingDpr??dpr,lite,held};}
+ function state(){return {mode,tier,dpr:pendingDpr??dpr,held};}
  // Pause adaptation across idle gaps (render-on-demand leaves long pauses).
  function idle(){lastDrawn=0;}
  function hold(on){on=!!on;if(on!==held){held=on;samples=[];lastDrawn=0;}}
  build();
- return {render,resize,setMode,setDprCap,setLite,state,idle,hold,focus,get tier(){return tier;}};
+ return {render,resize,setMode,setDprCap,state,idle,hold,focus,get tier(){return tier;}};
 }

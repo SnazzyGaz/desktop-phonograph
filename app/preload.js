@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('desk',{
  menu:state=>ipcRenderer.invoke('pet:menu',state),
  settings:()=>ipcRenderer.invoke('pet:settings'),set:patch=>ipcRenderer.send('pet:set',patch),
  clipboard:()=>ipcRenderer.invoke('pet:clipboard'),
- inspectRoom:step=>ipcRenderer.invoke('pet:inspect-room',step),
+ room:step=>ipcRenderer.invoke('pet:room',step),
  library:()=>ipcRenderer.invoke('pet:library'),saveLibrary:list=>ipcRenderer.invoke('pet:library-save',list),
  saveCover:(id,url)=>ipcRenderer.invoke('pet:cover-save',id,url),forget:(id,file)=>ipcRenderer.invoke('pet:forget',id,file),
  keep:(file,on)=>ipcRenderer.invoke('pet:keep',file,on),
