@@ -42,7 +42,7 @@ across your screens, scratch the record, and lift the needle to stop.
   underneath. It remembers where you left it, how big it was and your records. A tray
   icon hides it and brings it back. It works across several monitors.
 - **Toys.** The hula girl on the lid's front-left corner dances to the music. Swap her
-  for a shiba (who wiggles along too) with the round brass button at the bottom right
+  for a shiba (who wiggles along too; click him for a pat and he hops) with the round brass button at the bottom right
   of the cabinet front, or with *Swap toy* in the right-click menu. Your choice is kept.
 
 ## Using it
@@ -131,8 +131,8 @@ the same author; this project wraps them up as a desktop pet.
   finer than a pixel, so nothing is generated from the audio.
 - `static/vinyl-core.js`: sizes each record from the song's length (7- or 12-inch,
   45 or 33⅓ rpm) and works out the spiral the needle follows.
-- `static/shiba.js` and `static/shiba.bin`: the shiba, a baked furry mesh (1.4 MB) that
-  jiggles to the bass. It is only loaded once you swap to him; the main process reads
+- `static/shiba.js` and `static/shiba.bin`: the shiba, a baked mesh (1.4 MB) drawn as a smooth
+  body (the fur shells are off: at desk size they only sparkled) that jiggles to the bass. It is only loaded once you swap to him; the main process reads
   `shiba.bin` for the page, since a `file://` page can't `fetch()` its own files.
 - `play-order.js`: shuffle, repeat and what plays next.
 

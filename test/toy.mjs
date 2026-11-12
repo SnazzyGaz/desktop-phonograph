@@ -38,6 +38,27 @@ await page.waitForFunction(()=>{const s=window.vinylView.phonograph.getObjectByN
 await page.mouse.move(2,2);await page.waitForTimeout(800);
 st=await toyState(page);ok(st.toy==='shiba','clicking the pip swaps to the shiba');
 ok(st.shibaParts>0&&st.shibaTris>1000,`the shiba is loaded (${st.shibaParts} parts, ${st.shibaTris} triangles)`);ok(st.shibaVisible&&!st.hulaVisible,'the shiba shows and the hula girl is gone');
+// a pat: a real click on the dog makes him wobble (and is not a sleeve, a drag or click-through)
+{const at=await page.evaluate(()=>{const v=window.vinylView,T=v.THREE,s=v.phonograph.getObjectByName('shiba-toy');s.updateMatrixWorld(true);const b=new T.Box3().setFromObject(s),m=b.getCenter(new T.Vector3());
+  for(const f of [.55,.45,.65,.35,.75])for(const g of [.5,.35,.65]){const p=v.toClient(b.min.x+(b.max.x-b.min.x)*g,b.min.y+(b.max.y-b.min.y)*g,b.min.z+(b.max.z-b.min.z)*f);if(v.pickAt({clientX:p.x,clientY:p.y})?.kind==='shiba')return p;}return v.toClient(m.x,m.y,m.z);});
+ ok(await page.evaluate(p=>window.vinylView.pickAt({clientX:p.x,clientY:p.y})?.kind,at)==='shiba','the pick on the dog is the dog (not a sleeve in the crate behind him)');
+ ok(await page.evaluate(p=>window.petShell.hit(p.x,p.y),at),'the dog is solid in the hit test');
+ const clip={x:Math.round(at.x-45),y:Math.round(at.y-45),width:90,height:90};
+ await page.mouse.move(at.x,at.y);await page.waitForTimeout(600);
+ const still=await page.screenshot({clip,omitBackground:true,timeout:120000});const m0=await page.evaluate(()=>window.vinylView.shibaMotion());
+ const win0=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getPosition());
+ await page.evaluate(()=>{window.__patMs=6000;}); // the box draws ~1-2 frames a second with the dog in view: a slow-motion pat
+ await page.mouse.down();await page.mouse.up();
+ const f0=await page.evaluate(()=>window.vinylView.renderer.info.render.frame);
+ let peak=0;const shots=[];for(let i=0;i<6;i++){await page.waitForTimeout(400);shots.push(await page.screenshot({clip,omitBackground:true,timeout:120000}));const m=await page.evaluate(()=>window.vinylView.shibaMotion());peak=Math.max(peak,Math.hypot(...m.wob),Math.abs(m.ripple-m0.ripple));}
+ const diff=await page.evaluate(async([a,list])=>{const px=async u=>{const im=new Image();im.src='data:image/png;base64,'+u;await im.decode();const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const x=c.getContext('2d');x.drawImage(im,0,0);return x.getImageData(0,0,c.width,c.height).data;};
+  const A=await px(a);let best=0;for(const u of list){const B=await px(u);let n=0;for(let i=0;i<A.length;i+=4)if(Math.abs(A[i]-B[i])+Math.abs(A[i+1]-B[i+1])+Math.abs(A[i+2]-B[i+2])>30)n++;best=Math.max(best,n);}return best;},[still.toString('base64'),shots.map(b=>b.toString('base64'))]);
+ if(out){fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'pat-before.png'),still);shots.forEach((b,i)=>fs.writeFileSync(path.join(out,`pat-${i}.png`),b));}
+ console.log('  frames during the pat',(await page.evaluate(()=>window.vinylView.renderer.info.render.frame))-f0, 'clip',JSON.stringify(clip),'hopZ',await page.evaluate(()=>window.vinylView.phonograph.getObjectByName('shiba-yaw')?.position.z));
+ ok(peak>.02,`a click wobbles him (peak ${peak.toFixed(3)}, at rest ${Math.hypot(...m0.wob).toFixed(3)})`);
+ ok(diff>=20,`and it shows on screen (${diff} pixels changed)`);
+ const win1=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getPosition());ok(win0.join()===win1.join(),'the pat did not move the window');
+ ok(!(await page.evaluate(()=>window.vinylView.sleevePop)),'no sleeve popped out');}
 if(out){fs.mkdirSync(out,{recursive:true});await page.evaluate(()=>{window.__k=setInterval(()=>window.vinylView.invalidate(3),100);});await page.screenshot({path:path.join(out,'toy-shiba.png'),omitBackground:true,timeout:120000});await page.evaluate(()=>clearInterval(window.__k));}
 ok(!errors.length,`no page errors${errors.length?': '+errors.join(' | '):''}`);
 await app.close();

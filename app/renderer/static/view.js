@@ -466,7 +466,7 @@ function updateHula(energy){
    ?shibaAmp=&shibaLR=&shibaUD=&shibaMode=react|fig8|alt|beat&shibaFig=&shibaClamp=&shibaChaos=
    and for the jelly ?shibaJelly=&shibaSeam=&shibaHz=&shibaDamp=&shibaSpeed=&shibaDecay=&shibaBulge=&shibaResist= */
 const pageQuery=(()=>{try{return new URLSearchParams(location.search);}catch{return null;}})();
-const shiba=typeof createShiba==='function'?createShiba(THREE,{url:String(import.meta.url).replace(/[^/]*$/,'shiba.bin'),shells:10,query:pageQuery}):null;
+const shiba=typeof createShiba==='function'?createShiba(THREE,{url:String(import.meta.url).replace(/[^/]*$/,'shiba.bin'),shells:0,query:pageQuery}):null;
 function buildShibaSpot(R,top,W,D){
  const g=new THREE.Group();g.name='shiba-toy';g.position.set(-W*.8,-D*.8,top);
  if(!shiba)return g;
@@ -493,9 +493,23 @@ function ensureShiba(){
   applyToys();invalidate(3);return true;
  }).catch(e=>{shibaLoading=null;if(toyChoice==='shiba')swapToy('hula',true);return fail(e?.message||e);});
 }
+// A pat: a push he wobbles back from (even with reduced motion: it is the user's own click)
+// plus a little hop and a waggle of the whole dog, so it reads at desk-pet size
+let patUntil=0,patAt=0,patDir=1;const patMs=()=>window.__patMs||700; // tests on a software renderer stretch it to see it
+function patShiba(){if(!shiba?.loaded)return;patDir=Math.random()<.5?-1:1;shiba.poke(.8,2.4,1.6*patDir);patAt=performance.now();patUntil=patAt+Math.max(2500,patMs());invalidate(3);}
+function patPose(){
+ const g=phonograph?.getObjectByName('shiba-yaw');if(!g)return false;g.userData.yaw0??=g.rotation.z;
+ const u=(performance.now()-patAt)/patMs();
+ if(!patAt||u>=1){if(g.position.z!==0||g.rotation.z!==g.userData.yaw0){g.position.z=0;g.rotation.z=g.userData.yaw0;}return false;}
+ const s=(R/90)*11; // the dog's own scale (see buildShibaSpot)
+ g.position.z=s*.35*Math.max(0,Math.sin(Math.PI*Math.min(1,u/.45)));
+ g.rotation.z=g.userData.yaw0+patDir*.45*Math.sin(2*Math.PI*2.5*u)*(1-u);
+ return true;
+}
 function updateShiba(music){
  if(!shiba||!shiba.loaded)return false;
- return shiba.update(Math.min(.05,Math.max(.001,frameDt||1/60)),music,reduce());
+ const hop=patPose();
+ return shiba.update(Math.min(.05,Math.max(.001,frameDt||1/60)),music,reduce()&&performance.now()>patUntil)||hop;
 }
 /* ---------- toy switch: a brass pip low on the cabinet front, right of the keys ----------
    Press it (or "Swap toy" in the right-click menu) to swap the hula girl and the shiba (one
@@ -1582,6 +1596,8 @@ function pickAt(e){
  {const t=phonograph.getObjectByName('transport');if(t){const h=ray.intersectObject(t,true)[0];if(h){let o=h.object;while(o&&!o.userData.key)o=o.parent;if(o)return {kind:'transport',key:o.userData.key};}}}
  if(v.record&&tonearm.visible){const a=ray.intersectObjects(armParts,false)[0];if(a)return {kind:'arm'};}
  {const sw=phonograph.getObjectByName('toy-switch');if(sw&&ray.intersectObject(sw,true).length)return {kind:'toy-switch'};}
+ // the shiba sits in front of the crate: he is checked before the sleeves behind him
+ if(shiba?.pickMesh&&toyChoice==='shiba'&&phonograph.getObjectByName('shiba-toy')?.visible&&ray.intersectObject(shiba.pickMesh,false).length)return {kind:'shiba'};
  const sl=pickIn(sleeves.children.filter(o=>o.userData.pick==='sleeve'));
  if(sl&&sl.kind==='sleeve'&&shownInScene(sl.obj)&&sleeveInSight(sl))return sl;
  if(bench.group){const b=pickIn([bench.blanks,bench.post].filter(Boolean));if(b&&(b.kind==='blanks'||b.kind==='post'))return b;}
@@ -1600,6 +1616,7 @@ renderer.domElement.addEventListener('pointerdown',e=>{
   if(p0.kind==='transport'){pressKey(p0.key);return;}
   if(p0.kind==='knob'){knobFx.drag={y:e.clientY,v0:knobLevel()};setHoverNow('k:volume');setCursor('ns-resize');invalidate(2);return;} // never a window drag
   if(p0.kind==='toy-switch'){swapToy();return;}
+  if(p0.kind==='shiba'){patShiba();return;} // a pat on the dog (never a window drag)
   if(p0.kind==='blanks'){window.dispatchEvent?.(new CustomEvent('vinyl-open'));return;}
   if(p0.kind==='post'){window.dispatchEvent?.(new CustomEvent('vinyl-save',{detail:{id:null}}));return;}
   if(p0.kind==='arm'){const up=!v.down||v.state.grabbed;armHold={x:e.clientX,y:e.clientY,start:up?1:0,value:up?1:0,moved:false};return;}
@@ -1607,7 +1624,6 @@ renderer.domElement.addEventListener('pointerdown',e=>{
    sleeveDrag={jacket:j,id:j.userData.sleeveId,empty:!!j.userData.empty,pose:{p:j.position.clone(),q:j.quaternion.clone()},armed:false,x0:e.clientX,y0:e.clientY,moved:false,c:null,rack:false,post:false};
    setCursor('grabbing');return;}
  }
- if(shiba?.pickMesh&&toyChoice==='shiba'&&!sleevePop&&ray.intersectObject(shiba.pickMesh,false).length){const s=Math.random()<.5?-1:1;shiba.poke(.4,1.6,1.2*s);invalidate();return;} // a pat on the dog
  // Clicked empty space: tuck any half-out record back into its sleeve.
  if(sleevePop){clearSleevePop();setCursor('');}
  if(PET){const p=v.record&&!dropIn?hit(e):null,onDisc=p&&Math.hypot(p.x,p.y)<=R+1&&ray.intersectObject(disc,true).length>0;
@@ -1780,7 +1796,6 @@ function tickScene(dt, nowMs){
  if(updateSleeves(dt))why.push('sleeves');if(updateLathe(dt))why.push('lathe');if(updateSwap(dt))why.push('swap');
  if(updateCamTween(dt)){zoom.goal=null;zoom.vel=0;why.push('flight');}else{const z=applyZoom(dt);if(controls.update()||z)why.push('controls');}
  if(keepInRoom())why.push('room');
- if(shiba?.detail(camera,renderer.domElement.clientHeight||view.clientHeight))why.push('shiba-detail');
  updateAudioListener();
  const sig=signature();if(!(Math.abs(sig-lastSig)<(PET?2e-3:1e-7))){ /* the pet ignores sub-pixel settling */if(!why.length)why.push('moved:'+(sig-lastSig).toExponential(1));lastSig=sig;}
  let busy=why.length>0;window.vinylView.lastDraw=why.join(',')||(dirty>0?'dirty':'');
@@ -1829,7 +1844,7 @@ Object.assign(window.vinylView,{
  get camera(){return camera}, get controls(){return controls}, get disc(){return disc},
  get dropIn(){return dropIn}, get renderer(){return renderer}, resetView, pickAt, invalidate, get outgoing(){return outgoing},
  get sleevesGroup(){return sleeves}, get THREE(){return THREE}, get shiba(){return shiba},
- swapToy, get phonograph(){return phonograph},
+ swapToy, get phonograph(){return phonograph}, patShiba, shibaMotion:()=>shiba?.loaded?{wob:shiba.wob.toArray(),ripple:shiba.ripple||0,vel:shiba.state.vel.toArray()}:null,
  fanOpen, fanClose, fanScroll, fanPathCheck, get scene(){return scene}, petRoom, applyStage, handoffs, zoomWheel, setQuality:m=>post.setMode(m),
  fanStats(){const vis=fan.cards.filter(c=>c.visible);return {open:fan.on,closing:fan.closing,cards:fan.cards.length,visible:vis.length,tucking:fan.closing?vis.filter(c=>c.userData.anim?.arc).length:0};}, pressKey, knobPoint(){const k=phonograph.getObjectByName('volume-knob');if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, keyPoint(id){const k=phonograph.getObjectByName('transport-'+id);if(!k)return null;scene.updateMatrixWorld();return toClient(k.getWorldPosition(new THREE.Vector3()));}, nowPlayingCanvas:()=>NOW.canvas?.toDataURL('image/png'),
  setPendingSwap(from,tilt=0){pendingSwapFrom=from?from.clone():null;pendingSwapTilt=tilt;pendingExtract=null;},

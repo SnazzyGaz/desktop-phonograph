@@ -87,7 +87,8 @@ vec3 objectNormal=normalize(jelN+comb*0.4*uH);`)
     .replace('#include <begin_vertex>',`float furL=uLen*aFx.x;vec3 transformed=position+(furN*uH+comb*0.5*uH*uH)*furL+jelO;
 vBase=position;vFurCol=furLin(aCol);vFx=aFx;`);
    sh.fragmentShader=FUR_FS_HEAD+sh.fragmentShader
-    .replace('#include <color_fragment>',`#include <color_fragment>
+    .replace('#include <color_fragment>',shellCount===0?`#include <color_fragment>
+diffuseColor.rgb=vFurCol*mix(vFx.y,1.0,0.35);`:`#include <color_fragment>
 {vec3 q=vBase*uDens,c=floor(q),f=fract(q)-0.5;float r1=furHash(c),r2=furHash(c+17.3),clump=furVn(vBase*11.0),a=1.0;
  if(uH>0.0){float hmax=(0.3+0.7*r1)*(0.7+0.6*clump);if(uH>hmax||vFx.x<0.02)discard;
   float rad=0.68*(1.0-0.65*uH/hmax);a=1.0-smoothstep(rad-0.28,rad,length(f));if(a<0.04)discard;}
@@ -95,7 +96,7 @@ vBase=position;vFurCol=furLin(aCol);vFx=aFx;`);
     .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
 totalEmissiveRadiance+=diffuseColor.rgb*pow(1.0-max(dot(normal,normalize(vViewPosition)),0.0),3.0)*0.16*uH*uRim;`);
   };
-  m.customProgramCacheKey=()=>'shiba-fur';m.userData.shared=true;m.userData.uniforms=u;return m;
+  m.customProgramCacheKey=()=>shellCount===0?'shiba-smooth':'shiba-fur';m.userData.shared=true;m.userData.uniforms=u;return m;
  }
  function depthMaterial(){
   const m=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});
@@ -105,7 +106,7 @@ totalEmissiveRadiance+=diffuseColor.rgb*pow(1.0-max(dot(normal,normalize(vViewPo
  function materials(h){
   if(S.mats)return S.mats;
   const std=(c,r,extra={})=>{const m=new THREE.MeshStandardMaterial({color:c,roughness:r,...extra});m.userData.shared=true;return m;};
-  const fur=[];for(let i=0;i<=shells;i++)fur.push(furMaterial(i/shells,h.furLen,shells));
+  const fur=[];for(let i=0;i<=shells;i++)fur.push(furMaterial(shells?i/shells:0,h.furLen,shells)); // shells 0: just the smooth body
   return S.mats={fur,depth:depthMaterial(),black:std(0x0c0908,.42),lip:std(0x1a100c,.7),claw:std(0x2a211c,.5),
    shoe:std(0x2cbf5f,.5,{vertexColors:true}),strap:std(0x2cbf5f,.5),rivet:std(0x3b3b40,.35,{metalness:.4}),rivetCap:std(0xc9c9cf,.3,{metalness:.5})};
  }
